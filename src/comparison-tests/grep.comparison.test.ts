@@ -203,4 +203,62 @@ describe('grep command - Real Bash Comparison', () => {
       await compareOutputs(env, testDir, 'grep -E "ca+t" test.txt');
     });
   });
+
+  describe('-F (fixed strings)', () => {
+    it('should match literal string with special chars', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'hello.*world\ntest pattern\nhello.world\n',
+      });
+      await compareOutputs(env, testDir, 'grep -F ".*" test.txt');
+    });
+
+    it('should match literal dot', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'a.b\naXb\na..b\n',
+      });
+      await compareOutputs(env, testDir, 'grep -F "." test.txt');
+    });
+
+    it('should match literal brackets', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': '[test]\ntest\n[another]\n',
+      });
+      await compareOutputs(env, testDir, 'grep -F "[test]" test.txt');
+    });
+
+    it('should combine -F with -i', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'Hello.World\nhello.world\nHELLO.WORLD\n',
+      });
+      await compareOutputs(env, testDir, 'grep -Fi "hello.world" test.txt');
+    });
+  });
+
+  describe('-q (quiet mode)', () => {
+    it('should suppress output when match found', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'hello world\nfoo bar\n',
+      });
+      await compareOutputs(env, testDir, 'grep -q hello test.txt');
+    });
+
+    it('should return exit code 0 on match', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'hello world\n',
+      });
+      await compareOutputs(env, testDir, 'grep -q hello test.txt && echo found');
+    });
+
+    it('should return exit code 1 on no match', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'hello world\n',
+      });
+      await compareOutputs(env, testDir, 'grep -q notfound test.txt || echo "not found"');
+    });
+
+    it('should work with pipe', async () => {
+      const env = await setupFiles(testDir, {});
+      await compareOutputs(env, testDir, 'echo "hello world" | grep -q hello && echo matched');
+    });
+  });
 });

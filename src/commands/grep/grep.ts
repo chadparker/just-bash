@@ -1,9 +1,40 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const grepHelp = {
+  name: 'grep',
+  summary: 'print lines that match patterns',
+  usage: 'grep [OPTION]... PATTERN [FILE]...',
+  options: [
+    '-E, --extended-regexp    PATTERN is an extended regular expression',
+    '-F, --fixed-strings      PATTERN is a set of newline-separated strings',
+    '-i, --ignore-case        ignore case distinctions',
+    '-v, --invert-match       select non-matching lines',
+    '-w, --word-regexp        match only whole words',
+    '-c, --count              print only a count of matching lines',
+    '-l, --files-with-matches print only names of files with matches',
+    '-n, --line-number        print line number with output lines',
+    '-h, --no-filename        suppress the file name prefix on output',
+    '-o, --only-matching      show only nonempty parts of lines that match',
+    '-q, --quiet, --silent    suppress all normal output',
+    '-r, -R, --recursive      search directories recursively',
+    '-A NUM                   print NUM lines of trailing context',
+    '-B NUM                   print NUM lines of leading context',
+    '-C NUM                   print NUM lines of context',
+    '-e PATTERN               use PATTERN for matching',
+    '    --include=GLOB       search only files matching GLOB',
+    '    --help               display this help and exit',
+  ],
+};
 
 export const grepCommand: Command = {
   name: 'grep',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(grepHelp);
+    }
+
     let ignoreCase = false;
     let showLineNumbers = false;
     let invertMatch = false;
@@ -12,8 +43,10 @@ export const grepCommand: Command = {
     let recursive = false;
     let wholeWord = false;
     let extendedRegex = false;
+    let fixedStrings = false;
     let onlyMatching = false;
     let noFilename = false;
+    let quietMode = false;
     let beforeContext = 0;
     let afterContext = 0;
     const includePatterns: string[] = [];
@@ -72,8 +105,10 @@ export const grepCommand: Command = {
           else if (flag === 'r' || flag === 'R' || flag === '--recursive') recursive = true;
           else if (flag === 'w' || flag === '--word-regexp') wholeWord = true;
           else if (flag === 'E' || flag === '--extended-regexp') extendedRegex = true;
+          else if (flag === 'F' || flag === '--fixed-strings') fixedStrings = true;
           else if (flag === 'o' || flag === '--only-matching') onlyMatching = true;
           else if (flag === 'h' || flag === '--no-filename') noFilename = true;
+          else if (flag === 'q' || flag === '--quiet' || flag === '--silent') quietMode = true;
         }
       } else if (pattern === null) {
         pattern = arg;
@@ -91,7 +126,15 @@ export const grepCommand: Command = {
     }
 
     // Build regex
-    let regexPattern = extendedRegex ? pattern : escapeRegexForBasicGrep(pattern);
+    let regexPattern: string;
+    if (fixedStrings) {
+      // -F: escape all regex special characters for literal match
+      regexPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } else if (extendedRegex) {
+      regexPattern = pattern;
+    } else {
+      regexPattern = escapeRegexForBasicGrep(pattern);
+    }
     if (wholeWord) {
       regexPattern = `\\b${regexPattern}\\b`;
     }
@@ -110,6 +153,9 @@ export const grepCommand: Command = {
     // If no files and no stdin, read from stdin
     if (files.length === 0 && ctx.stdin) {
       const result = grepContent(ctx.stdin, regex, invertMatch, showLineNumbers, countOnly, '', onlyMatching, beforeContext, afterContext);
+      if (quietMode) {
+        return { stdout: '', stderr: '', exitCode: result.matched ? 0 : 1 };
+      }
       return {
         stdout: result.output,
         stderr: '',
@@ -189,6 +235,10 @@ export const grepCommand: Command = {
 
         if (result.matched) {
           anyMatch = true;
+          if (quietMode) {
+            // In quiet mode, exit immediately on first match
+            return { stdout: '', stderr: '', exitCode: 0 };
+          }
           if (filesWithMatches) {
             stdout += file + '\n';
           } else {
@@ -200,6 +250,10 @@ export const grepCommand: Command = {
       } catch {
         stderr += `grep: ${file}: No such file or directory\n`;
       }
+    }
+
+    if (quietMode) {
+      return { stdout: '', stderr: '', exitCode: anyMatch ? 0 : 1 };
     }
 
     return {

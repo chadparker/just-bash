@@ -1,10 +1,28 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const tailHelp = {
+  name: 'tail',
+  summary: 'output the last part of files',
+  usage: 'tail [OPTION]... [FILE]...',
+  options: [
+    '-c, --bytes=NUM    print the last NUM bytes',
+    '-n, --lines=NUM    print the last NUM lines (default 10)',
+    '-n +NUM            print starting from line NUM',
+    '    --help         display this help and exit',
+  ],
+};
 
 export const tailCommand: Command = {
   name: 'tail',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(tailHelp);
+    }
+
     let lines = 10;
+    let bytes: number | null = null;
     let fromLine = false; // true if +n syntax (start from line n)
     const files: string[] = [];
 
@@ -24,6 +42,14 @@ export const tailCommand: Command = {
         lines = parseInt(arg.slice(3), 10);
       } else if (arg.startsWith('-n')) {
         lines = parseInt(arg.slice(2), 10);
+      } else if (arg === '-c' && i + 1 < args.length) {
+        bytes = parseInt(args[++i], 10);
+      } else if (arg.startsWith('-c')) {
+        bytes = parseInt(arg.slice(2), 10);
+      } else if (arg.startsWith('--bytes=')) {
+        bytes = parseInt(arg.slice(8), 10);
+      } else if (arg.startsWith('--lines=')) {
+        lines = parseInt(arg.slice(8), 10);
       } else if (arg.match(/^-\d+$/)) {
         lines = parseInt(arg.slice(1), 10);
       } else if (arg.startsWith('-')) {
@@ -31,6 +57,14 @@ export const tailCommand: Command = {
       } else {
         files.push(arg);
       }
+    }
+
+    if (bytes !== null && (isNaN(bytes) || bytes < 0)) {
+      return {
+        stdout: '',
+        stderr: 'tail: invalid number of bytes\n',
+        exitCode: 1,
+      };
     }
 
     if (isNaN(lines) || lines < 0) {
@@ -41,23 +75,28 @@ export const tailCommand: Command = {
       };
     }
 
-    // If no files, read from stdin
-    if (files.length === 0) {
-      const inputLines = ctx.stdin.split('\n');
-      // Handle trailing newline
-      const effective = inputLines[inputLines.length - 1] === ''
-        ? inputLines.slice(0, -1)
-        : inputLines;
+    // Helper to get tail of content
+    const getTail = (content: string): string => {
+      if (bytes !== null) {
+        return content.slice(-bytes);
+      }
+      const contentLines = content.split('\n');
+      const effective = contentLines[contentLines.length - 1] === ''
+        ? contentLines.slice(0, -1)
+        : contentLines;
       let selected: string[];
       if (fromLine) {
-        // +n means "start from line n" (1-indexed)
         selected = effective.slice(lines - 1);
       } else {
         selected = effective.slice(-lines);
       }
-      const output = selected.join('\n');
+      return selected.join('\n') + '\n';
+    };
+
+    // If no files, read from stdin
+    if (files.length === 0) {
       return {
-        stdout: output + '\n',
+        stdout: getTail(ctx.stdin),
         stderr: '',
         exitCode: 0,
       };
@@ -79,19 +118,7 @@ export const tailCommand: Command = {
       try {
         const filePath = ctx.fs.resolvePath(ctx.cwd, file);
         const content = await ctx.fs.readFile(filePath);
-        const contentLines = content.split('\n');
-        // Handle trailing newline
-        const effective = contentLines[contentLines.length - 1] === ''
-          ? contentLines.slice(0, -1)
-          : contentLines;
-        let selected: string[];
-        if (fromLine) {
-          // +n means "start from line n" (1-indexed)
-          selected = effective.slice(lines - 1);
-        } else {
-          selected = effective.slice(-lines);
-        }
-        stdout += selected.join('\n') + '\n';
+        stdout += getTail(content);
       } catch {
         stderr += `tail: ${file}: No such file or directory\n`;
         exitCode = 1;

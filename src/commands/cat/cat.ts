@@ -1,15 +1,30 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const catHelp = {
+  name: 'cat',
+  summary: 'concatenate files and print on the standard output',
+  usage: 'cat [OPTION]... [FILE]...',
+  options: [
+    '-n, --number           number all output lines',
+    '    --help             display this help and exit',
+  ],
+};
 
 export const catCommand: Command = {
   name: 'cat',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(catHelp);
+    }
+
     let showLineNumbers = false;
     const files: string[] = [];
 
     // Parse arguments
     for (const arg of args) {
-      if (arg === '-n') {
+      if (arg === '-n' || arg === '--number') {
         showLineNumbers = true;
       } else if (arg === '-') {
         // '-' means read from stdin

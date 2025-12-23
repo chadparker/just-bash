@@ -1,4 +1,20 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const findHelp = {
+  name: 'find',
+  summary: 'search for files in a directory hierarchy',
+  usage: 'find [path...] [expression]',
+  options: [
+    '-name PATTERN    file name matches shell pattern PATTERN',
+    '-type TYPE       file is of type: f (regular file), d (directory)',
+    '-maxdepth LEVELS descend at most LEVELS directories',
+    '-mindepth LEVELS do not apply tests at levels less than LEVELS',
+    '-a, -and         logical AND (default)',
+    '-o, -or          logical OR',
+    '    --help       display this help and exit',
+  ],
+};
 
 function matchGlob(name: string, pattern: string): boolean {
   // Convert glob pattern to regex
@@ -128,17 +144,25 @@ function evaluateExpression(expr: Expression, name: string, isFile: boolean, isD
 export const findCommand: Command = {
   name: 'find',
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
-    let searchPath = '.';
+    if (hasHelpFlag(args)) {
+      return showHelp(findHelp);
+    }
 
-    // Find the path argument (first non-flag argument)
+    let searchPath = '.';
+    let maxDepth: number | null = null;
+    let minDepth: number | null = null;
+
+    // Find the path argument and parse -maxdepth/-mindepth
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
-      if (!arg.startsWith('-')) {
+      if (arg === '-maxdepth' && i + 1 < args.length) {
+        maxDepth = parseInt(args[++i], 10);
+      } else if (arg === '-mindepth' && i + 1 < args.length) {
+        minDepth = parseInt(args[++i], 10);
+      } else if (!arg.startsWith('-')) {
         searchPath = arg;
-        break;
-      }
-      // Skip value arguments
-      if (arg === '-name' || arg === '-type') {
+      } else if (arg === '-name' || arg === '-type') {
+        // Skip value arguments
         i++;
       }
     }
@@ -162,7 +186,12 @@ export const findCommand: Command = {
     const results: string[] = [];
 
     // Recursive function to find files
-    async function findRecursive(currentPath: string): Promise<void> {
+    async function findRecursive(currentPath: string, depth: number): Promise<void> {
+      // Check maxdepth - don't descend beyond this depth
+      if (maxDepth !== null && depth > maxDepth) {
+        return;
+      }
+
       let stat;
       try {
         stat = await ctx.fs.stat(currentPath);
@@ -187,9 +216,11 @@ export const findCommand: Command = {
             : searchPath + currentPath.slice(basePath.length);
 
       // Check if this entry matches our criteria
-      let matches = true;
+      // Only apply tests if we're at or beyond mindepth
+      const atOrBeyondMinDepth = minDepth === null || depth >= minDepth;
+      let matches = atOrBeyondMinDepth;
 
-      if (expr !== null) {
+      if (matches && expr !== null) {
         matches = evaluateExpression(expr, name, stat.isFile, stat.isDirectory);
       }
 
@@ -202,12 +233,12 @@ export const findCommand: Command = {
         const entries = await ctx.fs.readdir(currentPath);
         for (const entry of entries) {
           const childPath = currentPath === '/' ? '/' + entry : currentPath + '/' + entry;
-          await findRecursive(childPath);
+          await findRecursive(childPath, depth + 1);
         }
       }
     }
 
-    await findRecursive(basePath);
+    await findRecursive(basePath, 0);
 
     // Don't sort - real find uses filesystem traversal order
     const output = results.length > 0 ? results.join('\n') + '\n' : '';

@@ -238,4 +238,81 @@ describe('find command', () => {
       expect(result.exitCode).toBe(0);
     });
   });
+
+  describe('-maxdepth option', () => {
+    it('should limit depth to 0 (only starting point)', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -maxdepth 0');
+      expect(result.stdout).toBe('/project\n');
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('should limit depth to 1 (immediate children)', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -maxdepth 1');
+      expect(result.stdout).toBe(`/project
+/project/README.md
+/project/package.json
+/project/src
+/project/tests
+/project/tsconfig.json
+`);
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('should limit depth to 2', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -maxdepth 2 -name "*.ts"');
+      expect(result.stdout).toBe(`/project/src/index.ts
+/project/tests/index.test.ts
+`);
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe('-mindepth option', () => {
+    it('should skip results at depth 0', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -mindepth 1 -type d');
+      expect(result.stdout).toBe(`/project/src
+/project/src/utils
+/project/tests
+`);
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('should skip results at depth 0 and 1', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -mindepth 2 -type f -name "*.ts"');
+      expect(result.stdout).toBe(`/project/src/index.ts
+/project/src/utils/format.ts
+/project/src/utils/helpers.ts
+/project/tests/index.test.ts
+`);
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe('combined -maxdepth and -mindepth', () => {
+    it('should find only at specific depth', async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -mindepth 1 -maxdepth 1 -type f');
+      expect(result.stdout).toBe(`/project/README.md
+/project/package.json
+/project/tsconfig.json
+`);
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe('--help option', () => {
+    it('should show help text', async () => {
+      const env = createEnv();
+      const result = await env.exec('find --help');
+      expect(result.stdout).toContain('find');
+      expect(result.stdout).toContain('-name');
+      expect(result.stdout).toContain('-maxdepth');
+      expect(result.exitCode).toBe(0);
+    });
+  });
 });

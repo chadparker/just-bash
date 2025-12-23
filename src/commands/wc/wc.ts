@@ -1,9 +1,27 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const wcHelp = {
+  name: 'wc',
+  summary: 'print newline, word, and byte counts for each file',
+  usage: 'wc [OPTION]... [FILE]...',
+  options: [
+    '-c, --bytes      print the byte counts',
+    '-m, --chars      print the character counts',
+    '-l, --lines      print the newline counts',
+    '-w, --words      print the word counts',
+    '    --help       display this help and exit',
+  ],
+};
 
 export const wcCommand: Command = {
   name: 'wc',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(wcHelp);
+    }
+
     let showLines = false;
     let showWords = false;
     let showChars = false;

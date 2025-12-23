@@ -1,15 +1,39 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
 import { minimatch } from 'minimatch';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const lsHelp = {
+  name: 'ls',
+  summary: 'list directory contents',
+  usage: 'ls [OPTION]... [FILE]...',
+  options: [
+    '-a, --all            do not ignore entries starting with .',
+    '-A, --almost-all     do not list . and ..',
+    '-d, --directory      list directories themselves, not their contents',
+    '-l                   use a long listing format',
+    '-r, --reverse        reverse order while sorting',
+    '-R, --recursive      list subdirectories recursively',
+    '-t                   sort by time, newest first',
+    '-1                   list one file per line',
+    '    --help           display this help and exit',
+  ],
+};
 
 export const lsCommand: Command = {
   name: 'ls',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(lsHelp);
+    }
+
     let showAll = false;
     let showAlmostAll = false;
     let longFormat = false;
     let recursive = false;
     let reverse = false;
+    let directoryOnly = false;
+    let sortByTime = false;
     const paths: string[] = [];
 
     // Parse arguments
@@ -21,6 +45,8 @@ export const lsCommand: Command = {
           else if (flag === 'l') longFormat = true;
           else if (flag === 'R') recursive = true;
           else if (flag === 'r') reverse = true;
+          else if (flag === 'd') directoryOnly = true;
+          else if (flag === 't') sortByTime = true;
           // -1 is implicit in our implementation (one per line)
         }
       } else if (arg === '--all') {
@@ -29,6 +55,8 @@ export const lsCommand: Command = {
         showAlmostAll = true;
       } else if (arg === '--reverse') {
         reverse = true;
+      } else if (arg === '--directory') {
+        directoryOnly = true;
       } else {
         paths.push(arg);
       }

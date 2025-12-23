@@ -50,3 +50,18 @@ Build a class BashEnv that represents a fully simulated bash environment, but wi
 
 - Implement `cd` and a notion of a current working directory. Add unit tests.
 - Implement a true virtual shell that I can boot and use as a human on my tty
+
+## Implementation phase 6
+
+- ALWAYS start by reading AGENTS.md
+- Add -h or --help options where applicable
+- Go through each command and make sure we have all popular options supported
+- Are we missing important commands?
+
+## Implementation phase 7
+
+- Make all the commands appear in /bin in the virtual filesystem (or where it is most idiomatic)
+  - Document in README
+- Make the virtual file system default to putting files into `/home/user` if they are relative.
+  - Document
+- Add additional bash features (if statements, maybe functions if it is not too hard)

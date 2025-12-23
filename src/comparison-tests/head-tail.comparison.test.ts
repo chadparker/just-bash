@@ -78,6 +78,29 @@ describe('head command - Real Bash Comparison', () => {
       await compareOutputs(env, testDir, 'head -n 2 a.txt b.txt');
     });
   });
+
+  describe('-c option (bytes)', () => {
+    it('should output first n bytes', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'Hello, World!\n',
+      });
+      await compareOutputs(env, testDir, 'head -c 5 test.txt');
+    });
+
+    it('should handle -c with multiline content', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'line1\nline2\nline3\n',
+      });
+      await compareOutputs(env, testDir, 'head -c 10 test.txt');
+    });
+
+    it('should handle -c larger than file', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'short\n',
+      });
+      await compareOutputs(env, testDir, 'head -c 100 test.txt');
+    });
+  });
 });
 
 describe('tail command - Real Bash Comparison', () => {
@@ -155,6 +178,29 @@ describe('tail command - Real Bash Comparison', () => {
         'b.txt': createLinesFile(3),
       });
       await compareOutputs(env, testDir, 'tail -n 2 a.txt b.txt');
+    });
+  });
+
+  describe('-c option (bytes)', () => {
+    it('should output last n bytes', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'Hello, World!\n',
+      });
+      await compareOutputs(env, testDir, 'tail -c 5 test.txt');
+    });
+
+    it('should handle -c with multiline content', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'line1\nline2\nline3\n',
+      });
+      await compareOutputs(env, testDir, 'tail -c 10 test.txt');
+    });
+
+    it('should handle -c larger than file', async () => {
+      const env = await setupFiles(testDir, {
+        'test.txt': 'short\n',
+      });
+      await compareOutputs(env, testDir, 'tail -c 100 test.txt');
     });
   });
 });

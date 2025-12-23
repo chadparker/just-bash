@@ -24,6 +24,11 @@ import { sedCommand } from './commands/sed/sed.js';
 import { cutCommand } from './commands/cut/cut.js';
 import { trCommand } from './commands/tr/tr.js';
 import { trueCommand, falseCommand } from './commands/true/true.js';
+import { basenameCommand } from './commands/basename/basename.js';
+import { dirnameCommand } from './commands/dirname/dirname.js';
+import { teeCommand } from './commands/tee/tee.js';
+import { xargsCommand } from './commands/xargs/xargs.js';
+import { envCommand, printenvCommand } from './commands/env/env.js';
 
 export interface BashEnvOptions {
   /**
@@ -94,6 +99,12 @@ export class BashEnv {
     this.registerCommand(trCommand);
     this.registerCommand(trueCommand);
     this.registerCommand(falseCommand);
+    this.registerCommand(basenameCommand);
+    this.registerCommand(dirnameCommand);
+    this.registerCommand(teeCommand);
+    this.registerCommand(xargsCommand);
+    this.registerCommand(envCommand);
+    this.registerCommand(printenvCommand);
   }
 
   registerCommand(command: Command): void {

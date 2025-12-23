@@ -123,4 +123,98 @@ describe('find command - Real Bash Comparison', () => {
       await compareOutputs(env, testDir, 'find . -name ".*" | sort');
     });
   });
+
+  describe('-maxdepth option', () => {
+    it('should limit to depth 0 (starting point only)', async () => {
+      const env = await setupFiles(testDir, {
+        'file.txt': '',
+        'dir/file.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -maxdepth 0 | sort');
+    });
+
+    it('should limit to depth 1 (immediate children)', async () => {
+      const env = await setupFiles(testDir, {
+        'file.txt': '',
+        'dir/file.txt': '',
+        'dir/sub/file.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -maxdepth 1 | sort');
+    });
+
+    it('should limit to depth 2', async () => {
+      const env = await setupFiles(testDir, {
+        'a.txt': '',
+        'dir/b.txt': '',
+        'dir/sub/c.txt': '',
+        'dir/sub/deep/d.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -maxdepth 2 | sort');
+    });
+
+    it('should combine -maxdepth with -name', async () => {
+      const env = await setupFiles(testDir, {
+        'a.txt': '',
+        'dir/b.txt': '',
+        'dir/sub/c.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -maxdepth 2 -name "*.txt" | sort');
+    });
+
+    it('should combine -maxdepth with -type', async () => {
+      const env = await setupFiles(testDir, {
+        'file.txt': '',
+        'dir/file.txt': '',
+        'dir/sub/file.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -maxdepth 1 -type f | sort');
+    });
+  });
+
+  describe('-mindepth option', () => {
+    it('should skip depth 0', async () => {
+      const env = await setupFiles(testDir, {
+        'file.txt': '',
+        'dir/file.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -mindepth 1 | sort');
+    });
+
+    it('should skip depths 0 and 1', async () => {
+      const env = await setupFiles(testDir, {
+        'a.txt': '',
+        'dir/b.txt': '',
+        'dir/sub/c.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -mindepth 2 | sort');
+    });
+
+    it('should combine -mindepth with -type d', async () => {
+      const env = await setupFiles(testDir, {
+        'dir/sub/file.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -mindepth 1 -type d | sort');
+    });
+  });
+
+  describe('combined -maxdepth and -mindepth', () => {
+    it('should find only at specific depth range', async () => {
+      const env = await setupFiles(testDir, {
+        'a.txt': '',
+        'dir/b.txt': '',
+        'dir/sub/c.txt': '',
+        'dir/sub/deep/d.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -mindepth 1 -maxdepth 2 | sort');
+    });
+
+    it('should find files only at depth 1', async () => {
+      const env = await setupFiles(testDir, {
+        'a.txt': '',
+        'dir/b.txt': '',
+        'dir/sub/c.txt': '',
+      });
+      await compareOutputs(env, testDir, 'find . -mindepth 1 -maxdepth 1 -type f | sort');
+    });
+  });
 });

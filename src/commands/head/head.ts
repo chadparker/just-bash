@@ -1,10 +1,27 @@
 import { Command, CommandContext, ExecResult } from '../../types.js';
+import { hasHelpFlag, showHelp } from '../help.js';
+
+const headHelp = {
+  name: 'head',
+  summary: 'output the first part of files',
+  usage: 'head [OPTION]... [FILE]...',
+  options: [
+    '-c, --bytes=NUM    print the first NUM bytes',
+    '-n, --lines=NUM    print the first NUM lines (default 10)',
+    '    --help         display this help and exit',
+  ],
+};
 
 export const headCommand: Command = {
   name: 'head',
 
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(headHelp);
+    }
+
     let lines = 10;
+    let bytes: number | null = null;
     const files: string[] = [];
 
     // Parse arguments
@@ -14,6 +31,14 @@ export const headCommand: Command = {
         lines = parseInt(args[++i], 10);
       } else if (arg.startsWith('-n')) {
         lines = parseInt(arg.slice(2), 10);
+      } else if (arg === '-c' && i + 1 < args.length) {
+        bytes = parseInt(args[++i], 10);
+      } else if (arg.startsWith('-c')) {
+        bytes = parseInt(arg.slice(2), 10);
+      } else if (arg.startsWith('--bytes=')) {
+        bytes = parseInt(arg.slice(8), 10);
+      } else if (arg.startsWith('--lines=')) {
+        lines = parseInt(arg.slice(8), 10);
       } else if (arg.match(/^-\d+$/)) {
         lines = parseInt(arg.slice(1), 10);
       } else if (arg.startsWith('-')) {
@@ -21,6 +46,14 @@ export const headCommand: Command = {
       } else {
         files.push(arg);
       }
+    }
+
+    if (bytes !== null && (isNaN(bytes) || bytes < 0)) {
+      return {
+        stdout: '',
+        stderr: 'head: invalid number of bytes\n',
+        exitCode: 1,
+      };
     }
 
     if (isNaN(lines) || lines < 0) {
@@ -31,18 +64,25 @@ export const headCommand: Command = {
       };
     }
 
-    // If no files, read from stdin
-    if (files.length === 0) {
-      let inputLines = ctx.stdin.split('\n');
-      // Remove trailing empty line from split if input ended with newline
-      const hadTrailingNewline = ctx.stdin.endsWith('\n');
+    // Helper to get head of content
+    const getHead = (content: string): string => {
+      if (bytes !== null) {
+        return content.slice(0, bytes);
+      }
+      let inputLines = content.split('\n');
+      const hadTrailingNewline = content.endsWith('\n');
       if (hadTrailingNewline && inputLines.length > 0 && inputLines[inputLines.length - 1] === '') {
         inputLines = inputLines.slice(0, -1);
       }
       const selected = inputLines.slice(0, lines);
       const output = selected.join('\n');
+      return output + (output ? '\n' : '');
+    };
+
+    // If no files, read from stdin
+    if (files.length === 0) {
       return {
-        stdout: output + (output ? '\n' : ''),
+        stdout: getHead(ctx.stdin),
         stderr: '',
         exitCode: 0,
       };
@@ -64,12 +104,7 @@ export const headCommand: Command = {
       try {
         const filePath = ctx.fs.resolvePath(ctx.cwd, file);
         const content = await ctx.fs.readFile(filePath);
-        const contentLines = content.split('\n');
-        const selected = contentLines.slice(0, lines);
-        stdout += selected.join('\n');
-        if (selected.length < contentLines.length || content.endsWith('\n')) {
-          if (!stdout.endsWith('\n')) stdout += '\n';
-        }
+        stdout += getHead(content);
       } catch {
         stderr += `head: ${file}: No such file or directory\n`;
         exitCode = 1;

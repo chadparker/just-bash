@@ -36,7 +36,9 @@ pnpm shell
 
 ## Supported Commands
 
-`cat`, `cd`, `cp`, `cut`, `echo`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `pwd`, `rm`, `sed`, `sort`, `tail`, `touch`, `tr`, `true`, `false`, `uniq`, `wc`
+`basename`, `cat`, `cd`, `cp`, `cut`, `dirname`, `echo`, `env`, `find`, `grep`, `head`, `ls`, `mkdir`, `mv`, `printenv`, `pwd`, `rm`, `sed`, `sort`, `tail`, `tee`, `touch`, `tr`, `true`, `false`, `uniq`, `wc`, `xargs`
+
+All commands support `--help` for usage information.
 
 ## Shell Features
 
