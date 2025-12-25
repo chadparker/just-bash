@@ -44,6 +44,27 @@ const env = new BashEnv({
 await env.exec("echo $TEMP", { env: { TEMP: "value" }, cwd: "/tmp" });
 ```
 
+### AI SDK Tool
+
+Create a bash tool for use with the [AI SDK](https://ai-sdk.dev/):
+
+```typescript
+import { createBashTool } from "bash-env/ai";
+import { generateText } from "ai";
+
+const bashTool = createBashTool({
+  files: { "/data/users.json": '[{"name": "Alice"}, {"name": "Bob"}]' },
+});
+
+const result = await generateText({
+  model: "anthropic/claude-haiku-4.5",
+  tools: { bash: bashTool },
+  prompt: "Count the users in /data/users.json",
+});
+```
+
+See [`examples/bash-agent`](./examples/bash-agent) for a full implementation.
+
 ### Vercel Sandbox Compatible API
 
 BashEnv provides a `Sandbox` class that's API-compatible with [`@vercel/sandbox`](https://vercel.com/docs/vercel-sandbox), making it easy to swap implementations. You can start with BashEnv and switch to a real sandbox when you need the power of a full VM (e.g. to run node, python, or custom binaries).
@@ -97,25 +118,6 @@ for await (const msg of cmd.logs()) {
 // Wait for completion
 const finished = await cmd.wait();
 console.log(finished.exitCode); // 0
-```
-
-### AI SDK Tool
-
-Create a bash tool for use with the [Vercel AI SDK](https://sdk.vercel.ai/):
-
-```typescript
-import { createBashTool } from "bash-env/ai";
-import { generateText } from "ai";
-
-const bashTool = createBashTool({
-  files: { "/data/users.json": '[{"name": "Alice"}, {"name": "Bob"}]' },
-});
-
-const result = await generateText({
-  model: "anthropic/claude-haiku-4.5",
-  tools: { bash: bashTool },
-  prompt: "Count the users in /data/users.json",
-});
 ```
 
 ### Interactive Shell
@@ -203,7 +205,7 @@ const env = new BashEnv({
   },
 });
 
-// Allow all URLs and methods (use with extreme caution)
+// Allow all URLs and methods (use with caution)
 const env = new BashEnv({
   network: { dangerouslyAllowFullInternetAccess: true },
 });
@@ -219,21 +221,6 @@ The allow-list enforces:
 - **Path prefix**: Only paths starting with the specified prefix are allowed
 - **HTTP method restrictions**: Only GET and HEAD by default (configure `allowedMethods` for more)
 - **Redirect protection**: Redirects to non-allowed URLs are blocked
-
-```typescript
-// Only allow GitHub repos in myorg
-const env = new BashEnv({
-  network: { allowedUrlPrefixes: ["https://api.github.com/repos/myorg/"] },
-});
-
-// These work:
-// curl https://api.github.com/repos/myorg/repo1/issues
-// curl https://api.github.com/repos/myorg/repo2/pulls
-
-// These are blocked:
-// curl https://api.github.com/repos/otherorg/repo
-// curl https://api.github.com/users/user
-```
 
 ### Using curl
 
