@@ -3,21 +3,33 @@ import { BashEnv } from "../BashEnv.js";
 
 /**
  * Tests for shell-like functionality in BashEnv.
+ * Note: Each exec is a new shell - state (cd, export) does not persist across execs.
  * The actual interactive shell is tested manually.
  */
 describe("Shell functionality", () => {
   describe("cd command", () => {
-    it("should change directory", async () => {
+    it("should change directory within same exec", async () => {
+      const env = new BashEnv({
+        files: { "/home/user/test/.keep": "" },
+        cwd: "/home/user",
+      });
+
+      const result = await env.exec("cd test; pwd");
+      expect(result.stdout).toBe("/home/user/test\n");
+    });
+
+    it("cd does not persist across exec calls", async () => {
       const env = new BashEnv({
         files: { "/home/user/test/.keep": "" },
         cwd: "/home/user",
       });
 
       await env.exec("cd test");
-      expect(env.getCwd()).toBe("/home/user/test");
+      // Each exec is a new shell
+      expect(env.getCwd()).toBe("/home/user");
     });
 
-    it("should support cd -", async () => {
+    it("should support cd - within same exec", async () => {
       const env = new BashEnv({
         files: {
           "/dir1/.keep": "",
@@ -26,10 +38,8 @@ describe("Shell functionality", () => {
         cwd: "/",
       });
 
-      await env.exec("cd /dir1");
-      await env.exec("cd /dir2");
-      await env.exec("cd -");
-      expect(env.getCwd()).toBe("/dir1");
+      const result = await env.exec("cd /dir1; cd /dir2; cd -; pwd");
+      expect(result.stdout).toContain("/dir1");
     });
 
     it("should support cd ~", async () => {
@@ -39,8 +49,8 @@ describe("Shell functionality", () => {
         env: { HOME: "/home/user" },
       });
 
-      await env.exec("cd ~");
-      expect(env.getCwd()).toBe("/home/user");
+      const result = await env.exec("cd ~; pwd");
+      expect(result.stdout).toBe("/home/user\n");
     });
 
     it("should support cd without args", async () => {
@@ -50,8 +60,8 @@ describe("Shell functionality", () => {
         env: { HOME: "/home/user" },
       });
 
-      await env.exec("cd");
-      expect(env.getCwd()).toBe("/home/user");
+      const result = await env.exec("cd; pwd");
+      expect(result.stdout).toBe("/home/user\n");
     });
 
     it("should support cd ..", async () => {
@@ -60,8 +70,8 @@ describe("Shell functionality", () => {
         cwd: "/a/b/c",
       });
 
-      await env.exec("cd ..");
-      expect(env.getCwd()).toBe("/a/b");
+      const result = await env.exec("cd ..; pwd");
+      expect(result.stdout).toBe("/a/b\n");
     });
 
     it("should support cd with multiple .. in path", async () => {
@@ -70,8 +80,8 @@ describe("Shell functionality", () => {
         cwd: "/a/b/c/d",
       });
 
-      await env.exec("cd ../..");
-      expect(env.getCwd()).toBe("/a/b");
+      const result = await env.exec("cd ../..; pwd");
+      expect(result.stdout).toBe("/a/b\n");
     });
   });
 
@@ -85,14 +95,13 @@ describe("Shell functionality", () => {
       expect(result.stdout).toBe("/home/user\n");
     });
 
-    it("should reflect cd changes", async () => {
+    it("should reflect cd changes within same exec", async () => {
       const env = new BashEnv({
         files: { "/var/log/.keep": "" },
         cwd: "/",
       });
 
-      await env.exec("cd /var/log");
-      const result = await env.exec("pwd");
+      const result = await env.exec("cd /var/log; pwd");
       expect(result.stdout).toBe("/var/log\n");
     });
   });
@@ -106,7 +115,8 @@ describe("Shell functionality", () => {
 
       const result = await env.exec("cd /test && pwd");
       expect(result.stdout).toBe("/test\n");
-      expect(env.getCwd()).toBe("/test");
+      // cd doesn't persist across execs
+      expect(env.getCwd()).toBe("/");
     });
 
     it("should stop && chain on failure", async () => {
@@ -127,7 +137,8 @@ describe("Shell functionality", () => {
 
       const result = await env.exec("cd /nonexistent || cd /fallback && pwd");
       expect(result.stdout).toBe("/fallback\n");
-      expect(env.getCwd()).toBe("/fallback");
+      // cd doesn't persist across execs
+      expect(env.getCwd()).toBe("/");
     });
 
     it("should support ; chaining", async () => {
@@ -142,22 +153,39 @@ describe("Shell functionality", () => {
   });
 
   describe("environment variables", () => {
-    it("should support export", async () => {
+    it("should support export within same exec", async () => {
+      const env = new BashEnv();
+
+      const result = await env.exec("export MY_VAR=hello; echo $MY_VAR");
+      expect(result.stdout).toBe("hello\n");
+    });
+
+    it("export does not persist across exec calls", async () => {
       const env = new BashEnv();
 
       await env.exec("export MY_VAR=hello");
       const result = await env.exec("echo $MY_VAR");
-      expect(result.stdout).toBe("hello\n");
+      expect(result.stdout).toBe("\n");
     });
 
-    it("should support unset", async () => {
+    it("should support unset within same exec", async () => {
       const env = new BashEnv({
         env: { MY_VAR: "hello" },
       });
 
-      await env.exec("unset MY_VAR");
-      const result = await env.exec("echo $MY_VAR");
+      const result = await env.exec("unset MY_VAR; echo $MY_VAR");
       expect(result.stdout).toBe("\n");
+    });
+
+    it("initial env vars are available in every exec", async () => {
+      const env = new BashEnv({
+        env: { SHARED: "value" },
+      });
+
+      const result1 = await env.exec("echo $SHARED");
+      const result2 = await env.exec("echo $SHARED");
+      expect(result1.stdout).toBe("value\n");
+      expect(result2.stdout).toBe("value\n");
     });
   });
 

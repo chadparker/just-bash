@@ -5,9 +5,8 @@ describe("Execution Protection", () => {
   describe("recursion depth protection", () => {
     it("should error on infinite recursion", async () => {
       const env = new BashEnv();
-      // Define a function that calls itself infinitely
-      await env.exec("recurse() { recurse; }");
-      const result = await env.exec("recurse");
+      // Define and call function in same exec (each exec is a new shell)
+      const result = await env.exec("recurse() { recurse; }; recurse");
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("maximum recursion depth");
@@ -16,21 +15,18 @@ describe("Execution Protection", () => {
 
     it("should allow reasonable recursion depth", async () => {
       const env = new BashEnv();
-      // Define a function that calls itself a few times via a counter file
-      await env.exec("echo 5 > /count.txt");
-      await env.exec(
-        'countdown() { local n=$(cat /count.txt); if [ "$n" -gt 0 ]; then echo $n; echo $((n-1)) > /count.txt; countdown; fi; }',
+      // Define and call function in same exec - use counter file for recursion
+      const result = await env.exec(
+        'echo 5 > /count.txt; countdown() { local n=$(cat /count.txt); if [ "$n" -gt 0 ]; then echo $n; echo $((n-1)) > /count.txt; countdown; fi; }; countdown',
       );
-      // This simple test just verifies the function mechanism works
-      const result = await env.exec("countdown");
       // Should complete without hitting recursion limit
       expect(result.exitCode).toBe(0);
     });
 
     it("should include function name in recursion error", async () => {
       const env = new BashEnv();
-      await env.exec("myinfinite() { myinfinite; }");
-      const result = await env.exec("myinfinite");
+      // Define and call function in same exec (each exec is a new shell)
+      const result = await env.exec("myinfinite() { myinfinite; }; myinfinite");
 
       expect(result.stderr).toContain("myinfinite");
       expect(result.stderr).toContain("maximum recursion depth");
@@ -91,9 +87,10 @@ describe("Execution Protection", () => {
   describe("combined protection", () => {
     it("should protect against recursive function with loops", async () => {
       const env = new BashEnv();
-      // A function that could run forever with both recursion and loops
-      await env.exec("dangerous() { for i in 1 2 3; do dangerous; done; }");
-      const result = await env.exec("dangerous");
+      // Define and call function in same exec (each exec is a new shell)
+      const result = await env.exec(
+        "dangerous() { for i in 1 2 3; do dangerous; done; }; dangerous",
+      );
 
       // Should be stopped by either recursion or command limit
       // Exit code could be 1 or 2 depending on which limit is hit first
@@ -105,8 +102,8 @@ describe("Execution Protection", () => {
   describe("configurable limits", () => {
     it("should allow custom recursion depth", async () => {
       const env = new BashEnv({ maxCallDepth: 5 });
-      await env.exec("recurse() { recurse; }");
-      const result = await env.exec("recurse");
+      // Define and call function in same exec (each exec is a new shell)
+      const result = await env.exec("recurse() { recurse; }; recurse");
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("(5)");

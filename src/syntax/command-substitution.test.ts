@@ -9,10 +9,9 @@ describe("Command Substitution $(cmd)", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("should capture command output in variable", async () => {
+  it("should capture command output in variable (within same exec)", async () => {
     const env = new BashEnv();
-    await env.exec("X=$(echo world)");
-    const result = await env.exec("echo $X");
+    const result = await env.exec("X=$(echo world); echo $X");
     expect(result.stdout).toBe("world\n");
   });
 
@@ -61,10 +60,9 @@ describe("Command Substitution $(cmd)", () => {
     expect(result.stdout).toMatch(/lines:\s+3/);
   });
 
-  it("should work in variable assignment", async () => {
+  it("should work in variable assignment (within same exec)", async () => {
     const env = new BashEnv();
-    await env.exec("COUNT=$(echo 42)");
-    const result = await env.exec("echo $COUNT");
+    const result = await env.exec("COUNT=$(echo 42); echo $COUNT");
     expect(result.stdout).toBe("42\n");
   });
 
@@ -119,15 +117,13 @@ describe("Arithmetic Expansion $((expr))", () => {
   });
 
   it("should handle variables with $ prefix", async () => {
-    const env = new BashEnv();
-    await env.exec("export X=5");
+    const env = new BashEnv({ env: { X: "5" } });
     const result = await env.exec("echo $(($X + 3))");
     expect(result.stdout).toBe("8\n");
   });
 
   it("should handle variables without $ prefix", async () => {
-    const env = new BashEnv();
-    await env.exec("export X=5");
+    const env = new BashEnv({ env: { X: "5" } });
     const result = await env.exec("echo $((X + 3))");
     expect(result.stdout).toBe("8\n");
   });
@@ -173,18 +169,15 @@ describe("Arithmetic Expansion $((expr))", () => {
     expect(result.stdout).toBe("13\n"); // 2 + 12 - 1 = 13
   });
 
-  it("should work in variable assignment", async () => {
+  it("should work in variable assignment (within same exec)", async () => {
     const env = new BashEnv();
-    await env.exec("SUM=$((10 + 20))");
-    const result = await env.exec("echo $SUM");
+    const result = await env.exec("SUM=$((10 + 20)); echo $SUM");
     expect(result.stdout).toBe("30\n");
   });
 
-  it("should handle increment pattern", async () => {
+  it("should handle increment pattern (within same exec)", async () => {
     const env = new BashEnv();
-    await env.exec("export N=5");
-    await env.exec("N=$((N + 1))");
-    const result = await env.exec("echo $N");
+    const result = await env.exec("N=5; N=$((N + 1)); echo $N");
     expect(result.stdout).toBe("6\n");
   });
 });

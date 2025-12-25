@@ -77,9 +77,14 @@ export interface InterpreterOptions {
   maxCallDepth: number;
   maxCommandCount: number;
   maxLoopIterations: number;
-  exec: (script: string) => Promise<ExecResult>;
+  exec: (
+    script: string,
+    options?: { env?: Record<string, string>; cwd?: string },
+  ) => Promise<ExecResult>;
   /** Optional secure fetch function for network-enabled commands */
   fetch?: SecureFetch;
+  /** Optional sleep function for testing with mock clocks */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export class Interpreter {
@@ -98,6 +103,7 @@ export class Interpreter {
       executeStatement: this.executeStatement.bind(this),
       executeCommand: this.executeCommand.bind(this),
       fetch: options.fetch,
+      sleep: options.sleep,
     };
   }
 
@@ -126,12 +132,12 @@ export class Interpreter {
         exitCode = error.exitCode;
         this.ctx.state.lastExitCode = exitCode;
         this.ctx.state.env["?"] = String(exitCode);
-        return { stdout, stderr, exitCode };
+        return { stdout, stderr, exitCode, env: { ...this.ctx.state.env } };
       }
       throw error;
     }
 
-    return { stdout, stderr, exitCode };
+    return { stdout, stderr, exitCode, env: { ...this.ctx.state.env } };
   }
 
   private async executeStatement(node: StatementNode): Promise<ExecResult> {
@@ -439,6 +445,7 @@ export class Interpreter {
       exec: this.ctx.execFn,
       fetch: this.ctx.fetch,
       getRegisteredCommands: () => Array.from(this.ctx.commands.keys()),
+      sleep: this.ctx.sleep,
     };
 
     try {

@@ -53,8 +53,7 @@ describe("Case Statement", () => {
   });
 
   it("should work with variables", async () => {
-    const env = new BashEnv();
-    await env.exec("export FRUIT=apple");
+    const env = new BashEnv({ env: { FRUIT: "apple" } });
     const result = await env.exec(`
       case $FRUIT in
         apple) echo "It's an apple";;

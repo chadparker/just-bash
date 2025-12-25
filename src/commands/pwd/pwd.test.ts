@@ -22,16 +22,16 @@ describe("pwd", () => {
     expect(result.stdout).toBe("/home/user\n");
   });
 
-  it("should reflect cd changes", async () => {
+  it("should reflect cd changes within same exec", async () => {
     const env = new BashEnv({
       files: { "/home/user/.keep": "" },
     });
-    await env.exec("cd /home/user");
-    const result = await env.exec("pwd");
+    // cd and pwd must be in same exec (each exec is a new shell)
+    const result = await env.exec("cd /home/user; pwd");
     expect(result.stdout).toBe("/home/user\n");
   });
 
-  it("should work after multiple cd commands", async () => {
+  it("should work after multiple cd commands within same exec", async () => {
     const env = new BashEnv({
       files: {
         "/a/.keep": "",
@@ -39,10 +39,7 @@ describe("pwd", () => {
         "/c/.keep": "",
       },
     });
-    await env.exec("cd /a");
-    await env.exec("cd /b");
-    await env.exec("cd /c");
-    const result = await env.exec("pwd");
+    const result = await env.exec("cd /a; cd /b; cd /c; pwd");
     expect(result.stdout).toBe("/c\n");
   });
 
@@ -51,8 +48,7 @@ describe("pwd", () => {
       files: { "/parent/child/.keep": "" },
       cwd: "/parent/child",
     });
-    await env.exec("cd ..");
-    const result = await env.exec("pwd");
+    const result = await env.exec("cd ..; pwd");
     expect(result.stdout).toBe("/parent\n");
   });
 

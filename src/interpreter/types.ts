@@ -43,10 +43,15 @@ export interface InterpreterContext {
   maxCallDepth: number;
   maxCommandCount: number;
   maxLoopIterations: number;
-  execFn: (script: string) => Promise<ExecResult>;
+  execFn: (
+    script: string,
+    options?: { env?: Record<string, string>; cwd?: string },
+  ) => Promise<ExecResult>;
   executeScript: (node: ScriptNode) => Promise<ExecResult>;
   executeStatement: (node: StatementNode) => Promise<ExecResult>;
   executeCommand: (node: CommandNode, stdin: string) => Promise<ExecResult>;
   /** Optional secure fetch function for network-enabled commands */
   fetch?: SecureFetch;
+  /** Optional sleep function for testing with mock clocks */
+  sleep?: (ms: number) => Promise<void>;
 }

@@ -102,8 +102,10 @@ describe("Bash Syntax - Control Flow", () => {
 
     it("should handle if inside function body", async () => {
       const env = new BashEnv();
-      await env.exec("check() { if true; then echo inside; fi; }");
-      const result = await env.exec("check");
+      // Define and call function in same exec (each exec is a new shell)
+      const result = await env.exec(
+        "check() { if true; then echo inside; fi; }; check",
+      );
       expect(result.stdout).toBe("inside\n");
     });
 
@@ -125,69 +127,65 @@ describe("Bash Syntax - Control Flow", () => {
   });
 
   describe("functions", () => {
+    // Note: Each exec is a new shell, so functions must be defined and called within the same exec
+
     it("should define and call a function using function keyword", async () => {
       const env = new BashEnv();
-      await env.exec("function greet { echo hello; }");
-      const result = await env.exec("greet");
+      const result = await env.exec("function greet { echo hello; }; greet");
       expect(result.stdout).toBe("hello\n");
     });
 
     it("should define and call a function using () syntax", async () => {
       const env = new BashEnv();
-      await env.exec("greet() { echo hello; }");
-      const result = await env.exec("greet");
+      const result = await env.exec("greet() { echo hello; }; greet");
       expect(result.stdout).toBe("hello\n");
     });
 
     it("should pass arguments to function as $1, $2, etc.", async () => {
       const env = new BashEnv();
-      await env.exec("greet() { echo Hello $1; }");
-      const result = await env.exec("greet World");
+      const result = await env.exec("greet() { echo Hello $1; }; greet World");
       expect(result.stdout).toBe("Hello World\n");
     });
 
     it("should support $# for argument count", async () => {
       const env = new BashEnv();
-      await env.exec("count() { echo $#; }");
-      const result = await env.exec("count a b c");
+      const result = await env.exec("count() { echo $#; }; count a b c");
       expect(result.stdout).toBe("3\n");
     });
 
     it("should support $@ for all arguments", async () => {
       const env = new BashEnv();
-      await env.exec("show() { echo $@; }");
-      const result = await env.exec("show one two three");
+      const result = await env.exec("show() { echo $@; }; show one two three");
       expect(result.stdout).toBe("one two three\n");
     });
 
     it("should handle functions with multiple commands", async () => {
       const env = new BashEnv();
-      await env.exec("multi() { echo first; echo second; echo third; }");
-      const result = await env.exec("multi");
+      const result = await env.exec(
+        "multi() { echo first; echo second; echo third; }; multi",
+      );
       expect(result.stdout).toBe("first\nsecond\nthird\n");
     });
 
     it("should allow function to call other functions", async () => {
       const env = new BashEnv();
-      await env.exec("inner() { echo inside; }");
-      await env.exec("outer() { echo before; inner; echo after; }");
-      const result = await env.exec("outer");
+      const result = await env.exec(
+        "inner() { echo inside; }; outer() { echo before; inner; echo after; }; outer",
+      );
       expect(result.stdout).toBe("before\ninside\nafter\n");
     });
 
     it("should return exit code from last command", async () => {
       const env = new BashEnv();
-      await env.exec("fail() { echo hi; false; }");
-      const result = await env.exec("fail");
+      const result = await env.exec("fail() { echo hi; false; }; fail");
       expect(result.stdout).toBe("hi\n");
       expect(result.exitCode).toBe(1);
     });
 
     it("should override built-in commands", async () => {
       const env = new BashEnv();
-      await env.exec("echo() { true; }");
-      // Now 'echo' calls our function which does nothing
-      const result = await env.exec("echo hello");
+      // Define echo function then call it
+      const result = await env.exec("echo() { true; }; echo hello");
       expect(result.stdout).toBe("");
     });
 
@@ -195,43 +193,54 @@ describe("Bash Syntax - Control Flow", () => {
       const env = new BashEnv({
         files: { "/data.txt": "line1\nline2\nline3\n" },
       });
-      await env.exec("countlines() { cat $1 | wc -l; }");
-      const result = await env.exec("countlines /data.txt");
+      const result = await env.exec(
+        "countlines() { cat $1 | wc -l; }; countlines /data.txt",
+      );
       expect(result.stdout.trim()).toBe("3");
+    });
+
+    it("function definitions do not persist across exec calls", async () => {
+      const env = new BashEnv();
+      await env.exec("greet() { echo hello; }");
+      // Each exec is a new shell - function is not defined
+      const result = await env.exec("greet");
+      expect(result.exitCode).toBe(127); // command not found
     });
   });
 
   describe("local keyword", () => {
+    // Note: Each exec is a new shell, so functions must be defined and called within the same exec
+
     it("should declare local variable with value", async () => {
       const env = new BashEnv();
-      await env.exec("test_func() { local x=hello; echo $x; }");
-      const result = await env.exec("test_func");
+      const result = await env.exec(
+        "test_func() { local x=hello; echo $x; }; test_func",
+      );
       expect(result.stdout).toBe("hello\n");
     });
 
     it("should not affect outer scope", async () => {
-      const env = new BashEnv();
-      await env.exec("export x=outer");
-      await env.exec("test_func() { local x=inner; echo $x; }");
-      await env.exec("test_func");
-      const result = await env.exec("echo $x");
-      expect(result.stdout).toBe("outer\n");
+      const env = new BashEnv({ env: { x: "outer" } });
+      const result = await env.exec(
+        "test_func() { local x=inner; echo $x; }; test_func; echo $x",
+      );
+      expect(result.stdout).toBe("inner\nouter\n");
     });
 
     it("should shadow outer variable", async () => {
-      const env = new BashEnv();
-      await env.exec("export x=outer");
-      await env.exec("test_func() { local x=inner; echo $x; }");
-      const result = await env.exec("test_func");
+      const env = new BashEnv({ env: { x: "outer" } });
+      const result = await env.exec(
+        "test_func() { local x=inner; echo $x; }; test_func",
+      );
       expect(result.stdout).toBe("inner\n");
     });
 
     it("should restore undefined variable after function", async () => {
       const env = new BashEnv();
-      await env.exec("test_func() { local newvar=value; echo $newvar; }");
-      await env.exec("test_func");
-      const result = await env.exec('echo "[$newvar]"');
-      expect(result.stdout).toBe("[]\n");
+      const result = await env.exec(
+        'test_func() { local newvar=value; echo $newvar; }; test_func; echo "[$newvar]"',
+      );
+      expect(result.stdout).toBe("value\n[]\n");
     });
 
     it("should error when used outside function", async () => {
@@ -243,30 +252,33 @@ describe("Bash Syntax - Control Flow", () => {
 
     it("should handle multiple local declarations", async () => {
       const env = new BashEnv();
-      await env.exec("test_func() { local a=1 b=2 c=3; echo $a $b $c; }");
-      const result = await env.exec("test_func");
+      const result = await env.exec(
+        "test_func() { local a=1 b=2 c=3; echo $a $b $c; }; test_func",
+      );
       expect(result.stdout).toBe("1 2 3\n");
     });
 
     it("should declare local without value", async () => {
       const env = new BashEnv();
-      await env.exec("test_func() { local x; x=assigned; echo $x; }");
-      const result = await env.exec("test_func");
+      const result = await env.exec(
+        "test_func() { local x; x=assigned; echo $x; }; test_func",
+      );
       expect(result.stdout).toBe("assigned\n");
     });
 
     it("should work with nested function calls", async () => {
       const env = new BashEnv();
-      await env.exec("inner() { local x=inner; echo $x; }");
-      await env.exec("outer() { local x=outer; inner; echo $x; }");
-      const result = await env.exec("outer");
+      const result = await env.exec(
+        "inner() { local x=inner; echo $x; }; outer() { local x=outer; inner; echo $x; }; outer",
+      );
       expect(result.stdout).toBe("inner\nouter\n");
     });
 
     it("should keep local changes within same scope", async () => {
       const env = new BashEnv();
-      await env.exec("test_func() { local x=first; x=second; echo $x; }");
-      const result = await env.exec("test_func");
+      const result = await env.exec(
+        "test_func() { local x=first; x=second; echo $x; }; test_func",
+      );
       expect(result.stdout).toBe("second\n");
     });
   });

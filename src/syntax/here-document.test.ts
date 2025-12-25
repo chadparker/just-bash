@@ -23,8 +23,7 @@ END`);
   });
 
   it("should expand variables in here document", async () => {
-    const env = new BashEnv();
-    await env.exec("export NAME=Alice");
+    const env = new BashEnv({ env: { NAME: "Alice" } });
     const result = await env.exec(`cat <<EOF
 Hello, $NAME!
 EOF`);
@@ -33,8 +32,7 @@ EOF`);
   });
 
   it("should NOT expand variables when delimiter is quoted", async () => {
-    const env = new BashEnv();
-    await env.exec("export NAME=Alice");
+    const env = new BashEnv({ env: { NAME: "Alice" } });
     const result = await env.exec(`cat <<'EOF'
 Hello, $NAME!
 EOF`);
@@ -43,8 +41,7 @@ EOF`);
   });
 
   it("should work with double-quoted delimiter", async () => {
-    const env = new BashEnv();
-    await env.exec("export NAME=Alice");
+    const env = new BashEnv({ env: { NAME: "Alice" } });
     const result = await env.exec(`cat <<"EOF"
 Hello, $NAME!
 EOF`);

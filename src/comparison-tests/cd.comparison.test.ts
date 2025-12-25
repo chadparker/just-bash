@@ -38,9 +38,8 @@ describe("cd command - Real Bash Comparison", () => {
         "parent/child/file.txt": "content",
       });
 
-      // Start in child, go to parent
-      await env.exec("cd parent/child");
-      const envResult = await env.exec("cd .. && pwd");
+      // All commands in same exec (each exec is isolated like a new shell)
+      const envResult = await env.exec("cd parent/child && cd .. && pwd");
 
       const realResult = await runRealBash(
         "cd parent/child && cd .. && pwd",
@@ -57,8 +56,8 @@ describe("cd command - Real Bash Comparison", () => {
         "a/b/c/file.txt": "content",
       });
 
-      await env.exec("cd a/b/c");
-      const envResult = await env.exec("cd ../.. && pwd");
+      // All commands in same exec (each exec is isolated like a new shell)
+      const envResult = await env.exec("cd a/b/c && cd ../.. && pwd");
 
       const realResult = await runRealBash(
         "cd a/b/c && cd ../.. && pwd",
@@ -78,10 +77,8 @@ describe("cd command - Real Bash Comparison", () => {
         "dir2/file.txt": "",
       });
 
-      // cd to dir1, then dir2, then back with -
-      await env.exec("cd dir1");
-      await env.exec("cd ../dir2");
-      const envResult = await env.exec("cd - && pwd");
+      // All commands in same exec (each exec is isolated like a new shell)
+      const envResult = await env.exec("cd dir1 && cd ../dir2 && cd - && pwd");
 
       const realResult = await runRealBash(
         "cd dir1 && cd ../dir2 && cd - && pwd",
@@ -144,11 +141,11 @@ describe("cd command - Real Bash Comparison", () => {
         "file.txt": "",
       });
 
-      const envPwdBefore = await env.exec("pwd");
-      await env.exec("cd .");
-      const envPwdAfter = await env.exec("pwd");
+      // All commands in same exec (each exec is isolated like a new shell)
+      const envResult = await env.exec("pwd; cd .; pwd");
+      const lines = envResult.stdout.trim().split("\n");
 
-      expect(envPwdBefore.stdout).toBe(envPwdAfter.stdout);
+      expect(lines[0]).toBe(lines[1]);
     });
   });
 });

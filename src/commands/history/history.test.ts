@@ -17,16 +17,14 @@ describe("history command", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("should clear history with -c", async () => {
+  it("should clear history with -c (within same exec)", async () => {
     const env = new BashEnv({
       env: { BASH_HISTORY: '["echo hello","ls -la"]' },
     });
-    const result = await env.exec("history -c");
+    // history -c and verify in same exec (each exec is a new shell)
+    const result = await env.exec("history -c; history");
     expect(result.exitCode).toBe(0);
-
-    // Verify history is cleared
-    const historyResult = await env.exec("history");
-    expect(historyResult.stdout).toBe("");
+    expect(result.stdout).toBe("");
   });
 
   it("should display history with line numbers", async () => {

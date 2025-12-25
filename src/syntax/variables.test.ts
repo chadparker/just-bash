@@ -66,24 +66,21 @@ describe("Bash Syntax - Variables and Quoting", () => {
       expect(result.stdout).toBe("content");
     });
 
-    it("should handle export command", async () => {
+    it("should handle export command (within same exec)", async () => {
       const env = new BashEnv();
-      await env.exec("export FOO=bar");
-      const result = await env.exec("echo $FOO");
+      const result = await env.exec("export FOO=bar; echo $FOO");
       expect(result.stdout).toBe("bar\n");
     });
 
-    it("should handle export with multiple assignments", async () => {
+    it("should handle export with multiple assignments (within same exec)", async () => {
       const env = new BashEnv();
-      await env.exec("export A=1 B=2 C=3");
-      const result = await env.exec("echo $A $B $C");
+      const result = await env.exec("export A=1 B=2 C=3; echo $A $B $C");
       expect(result.stdout).toBe("1 2 3\n");
     });
 
-    it("should handle unset command", async () => {
+    it("should handle unset command (within same exec)", async () => {
       const env = new BashEnv({ env: { FOO: "bar" } });
-      await env.exec("unset FOO");
-      const result = await env.exec('echo "[$FOO]"');
+      const result = await env.exec('unset FOO; echo "[$FOO]"');
       expect(result.stdout).toBe("[]\n");
     });
   });

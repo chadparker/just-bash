@@ -27,7 +27,12 @@ import {
   type SecureFetch,
 } from "./network/index.js";
 import { type ParseException, parse } from "./parser/parser.js";
-import type { Command, CommandRegistry, ExecResult } from "./types.js";
+import type {
+  BashExecResult,
+  Command,
+  CommandRegistry,
+  ExecResult,
+} from "./types.js";
 
 // Default protection limits
 const DEFAULT_MAX_CALL_DEPTH = 100;
@@ -53,6 +58,12 @@ export interface BashEnvOptions {
    * Use this to restrict which commands can be executed.
    */
   commands?: CommandName[];
+  /**
+   * Optional sleep function for the sleep command.
+   * If provided, used instead of real setTimeout.
+   * Useful for testing with mock clocks.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ExecOptions {
@@ -76,6 +87,7 @@ export class BashEnv {
   private maxCommandCount: number;
   private maxLoopIterations: number;
   private secureFetch?: SecureFetch;
+  private sleepFn?: (ms: number) => Promise<void>;
 
   // Interpreter state (shared with interpreter instances)
   private state: InterpreterState;
@@ -102,6 +114,9 @@ export class BashEnv {
     if (options.network) {
       this.secureFetch = createSecureFetch(options.network);
     }
+
+    // Store sleep function if provided (for mock clocks in testing)
+    this.sleepFn = options.sleep;
 
     // Initialize interpreter state
     this.state = {
@@ -167,7 +182,10 @@ export class BashEnv {
     }
   }
 
-  async exec(commandLine: string, options?: ExecOptions): Promise<ExecResult> {
+  async exec(
+    commandLine: string,
+    options?: ExecOptions,
+  ): Promise<BashExecResult> {
     if (this.state.callDepth === 0) {
       this.state.commandCount = 0;
     }
@@ -178,28 +196,30 @@ export class BashEnv {
         stdout: "",
         stderr: `bash: maximum command count (${this.maxCommandCount}) exceeded (possible infinite loop). Increase with maxCommandCount option.\n`,
         exitCode: 1,
+        env: { ...this.state.env, ...options?.env },
       };
     }
 
     if (!commandLine.trim()) {
-      return { stdout: "", stderr: "", exitCode: 0 };
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        env: { ...this.state.env, ...options?.env },
+      };
     }
 
-    // Determine which state to use for execution
-    // If per-exec options are provided, create an isolated state copy
-    // This ensures concurrent exec calls don't interfere with each other
-    const hasPerExecOptions = options?.env || options?.cwd;
-    const execState: InterpreterState = hasPerExecOptions
-      ? {
-          ...this.state,
-          env: { ...this.state.env, ...options?.env },
-          cwd: options?.cwd ?? this.state.cwd,
-          // Deep copy mutable objects to prevent interference
-          functions: new Map(this.state.functions),
-          localScopes: [...this.state.localScopes],
-          options: { ...this.state.options },
-        }
-      : this.state;
+    // Each exec call gets an isolated state copy - like starting a new shell
+    // This ensures exec calls never interfere with each other
+    const execState: InterpreterState = {
+      ...this.state,
+      env: { ...this.state.env, ...options?.env },
+      cwd: options?.cwd ?? this.state.cwd,
+      // Deep copy mutable objects to prevent interference
+      functions: new Map(this.state.functions),
+      localScopes: [...this.state.localScopes],
+      options: { ...this.state.options },
+    };
 
     // Normalize indented multi-line scripts
     const normalizedLines = commandLine
@@ -219,16 +239,20 @@ export class BashEnv {
         maxLoopIterations: this.maxLoopIterations,
         exec: this.exec.bind(this),
         fetch: this.secureFetch,
+        sleep: this.sleepFn,
       };
 
       const interpreter = new Interpreter(interpreterOptions, execState);
-      return await interpreter.executeScript(ast);
+      const result = await interpreter.executeScript(ast);
+      // Interpreter always sets env, assert it for type safety
+      return result as BashExecResult;
     } catch (error) {
       if ((error as ParseException).name === "ParseException") {
         return {
           stdout: "",
           stderr: `bash: syntax error: ${(error as Error).message}\n`,
           exitCode: 2,
+          env: { ...this.state.env, ...options?.env },
         };
       }
       throw error;

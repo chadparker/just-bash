@@ -40,6 +40,7 @@ export type {
 // Vercel Sandbox API compatible exports
 export { Command as SandboxCommand, Sandbox } from "./sandbox/index.js";
 export type {
+  BashExecResult,
   Command,
   CommandContext,
   ExecResult,

@@ -163,36 +163,67 @@ describe("BashEnv General", () => {
       expect(result.stdout).toBe("value::\n");
     });
 
-    it("should set variables with export", async () => {
+    it("should set variables with export (within same exec)", async () => {
       const env = new BashEnv();
-      await env.exec("export FOO=bar");
-      const result = await env.exec("echo $FOO");
+      // Each exec is a new shell - export only persists within the same exec
+      const result = await env.exec("export FOO=bar; echo $FOO");
       expect(result.stdout).toBe("bar\n");
     });
 
-    it("should set multiple variables with export", async () => {
+    it("should set multiple variables with export (within same exec)", async () => {
       const env = new BashEnv();
-      await env.exec("export A=1 B=2 C=3");
-      const result = await env.exec("echo $A $B $C");
+      const result = await env.exec("export A=1 B=2 C=3; echo $A $B $C");
       expect(result.stdout).toBe("1 2 3\n");
     });
 
-    it("should unset variables", async () => {
+    it("should unset variables (within same exec)", async () => {
       const env = new BashEnv({
         env: { FOO: "bar" },
       });
-      await env.exec("unset FOO");
-      const result = await env.exec('echo "v:$FOO:"');
+      // unset only affects the current exec
+      const result = await env.exec('unset FOO; echo "v:$FOO:"');
       expect(result.stdout).toBe("v::\n");
     });
 
-    it("should unset multiple variables", async () => {
+    it("should unset multiple variables (within same exec)", async () => {
       const env = new BashEnv({
         env: { A: "1", B: "2" },
       });
-      await env.exec("unset A B");
-      const result = await env.exec('echo "$A$B"');
+      const result = await env.exec('unset A B; echo "$A$B"');
       expect(result.stdout).toBe("\n");
+    });
+
+    it("export does not persist across exec calls", async () => {
+      const env = new BashEnv();
+      await env.exec("export FOO=bar");
+      // Each exec is a new shell - FOO is not set
+      const result = await env.exec("echo $FOO");
+      expect(result.stdout).toBe("\n");
+    });
+
+    it("should return final env in result", async () => {
+      const env = new BashEnv({ env: { INITIAL: "value" } });
+      const result = await env.exec("export NEW_VAR=hello");
+      expect(result.env.INITIAL).toBe("value");
+      expect(result.env.NEW_VAR).toBe("hello");
+    });
+
+    it("should return env with modified values", async () => {
+      const env = new BashEnv({ env: { FOO: "original" } });
+      const result = await env.exec("export FOO=modified");
+      expect(result.env.FOO).toBe("modified");
+    });
+
+    it("should return env with unset values removed", async () => {
+      const env = new BashEnv({ env: { TO_REMOVE: "value" } });
+      const result = await env.exec("unset TO_REMOVE");
+      expect(result.env.TO_REMOVE).toBeUndefined();
+    });
+
+    it("should return env even for empty command", async () => {
+      const env = new BashEnv({ env: { EXISTING: "value" } });
+      const result = await env.exec("");
+      expect(result.env.EXISTING).toBe("value");
     });
 
     it("should use HOME variable", async () => {
@@ -351,12 +382,25 @@ describe("BashEnv General", () => {
   });
 
   describe("cd command", () => {
-    it("should change directory", async () => {
+    it("should change directory within same exec", async () => {
       const env = new BashEnv({
         files: { "/home/user/.keep": "" },
       });
+      // cd works within the same exec
+      const result = await env.exec("cd /home/user; pwd");
+      expect(result.stdout).toBe("/home/user\n");
+    });
+
+    it("cd does not persist across exec calls", async () => {
+      const env = new BashEnv({
+        files: { "/home/user/.keep": "" },
+        cwd: "/",
+      });
       await env.exec("cd /home/user");
-      expect(env.getCwd()).toBe("/home/user");
+      // Each exec is a new shell - cwd resets to initial value
+      expect(env.getCwd()).toBe("/");
+      const result = await env.exec("pwd");
+      expect(result.stdout).toBe("/\n");
     });
 
     it("should go to HOME with cd alone", async () => {
@@ -365,8 +409,8 @@ describe("BashEnv General", () => {
         env: { HOME: "/home" },
         cwd: "/tmp",
       });
-      await env.exec("cd");
-      expect(env.getCwd()).toBe("/home");
+      const result = await env.exec("cd; pwd");
+      expect(result.stdout).toBe("/home\n");
     });
 
     it("should go to HOME with cd ~", async () => {
@@ -375,21 +419,20 @@ describe("BashEnv General", () => {
         env: { HOME: "/home/user" },
         cwd: "/tmp",
       });
-      await env.exec("cd ~");
-      expect(env.getCwd()).toBe("/home/user");
+      const result = await env.exec("cd ~; pwd");
+      expect(result.stdout).toBe("/home/user\n");
     });
 
-    it("should handle cd -", async () => {
+    it("should handle cd - within same exec", async () => {
       const env = new BashEnv({
         files: {
           "/dir1/.keep": "",
           "/dir2/.keep": "",
         },
       });
-      await env.exec("cd /dir1");
-      await env.exec("cd /dir2");
-      await env.exec("cd -");
-      expect(env.getCwd()).toBe("/dir1");
+      // cd - works within the same exec
+      const result = await env.exec("cd /dir1; cd /dir2; cd -; pwd");
+      expect(result.stdout).toContain("/dir1\n");
     });
 
     it("should handle cd ..", async () => {
@@ -397,8 +440,8 @@ describe("BashEnv General", () => {
         files: { "/parent/child/.keep": "" },
         cwd: "/parent/child",
       });
-      await env.exec("cd ..");
-      expect(env.getCwd()).toBe("/parent");
+      const result = await env.exec("cd ..; pwd");
+      expect(result.stdout).toBe("/parent\n");
     });
 
     it("should error on non-existent directory", async () => {
@@ -422,8 +465,8 @@ describe("BashEnv General", () => {
         files: { "/home/user/projects/.keep": "" },
         cwd: "/home/user",
       });
-      await env.exec("cd projects");
-      expect(env.getCwd()).toBe("/home/user/projects");
+      const result = await env.exec("cd projects; pwd");
+      expect(result.stdout).toBe("/home/user/projects\n");
     });
   });
 

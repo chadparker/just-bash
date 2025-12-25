@@ -116,53 +116,41 @@ async function executeScript(
     };
   }
 
-  // Set up positional parameters in the environment
-  const envBackup = { ...ctx.env };
-
-  // Set $0 to script name and positional parameters
-  ctx.env["0"] = scriptName;
+  // Build positional parameters for the exec env option
+  // Each exec is isolated, so we pass parameters via the env option
+  const positionalEnv: Record<string, string> = {
+    "0": scriptName,
+    "#": String(scriptArgs.length),
+    "@": scriptArgs.join(" "),
+    "*": scriptArgs.join(" "),
+  };
   scriptArgs.forEach((arg, i) => {
-    ctx.env[String(i + 1)] = arg;
+    positionalEnv[String(i + 1)] = arg;
   });
-  ctx.env["#"] = String(scriptArgs.length);
-  ctx.env["@"] = scriptArgs.join(" ");
-  ctx.env["*"] = scriptArgs.join(" ");
 
-  try {
-    // Skip shebang line if present
-    let scriptToRun = script;
-    if (scriptToRun.startsWith("#!")) {
-      const firstNewline = scriptToRun.indexOf("\n");
-      if (firstNewline !== -1) {
-        scriptToRun = scriptToRun.slice(firstNewline + 1);
-      }
+  // Skip shebang line if present
+  let scriptToRun = script;
+  if (scriptToRun.startsWith("#!")) {
+    const firstNewline = scriptToRun.indexOf("\n");
+    if (firstNewline !== -1) {
+      scriptToRun = scriptToRun.slice(firstNewline + 1);
     }
-
-    // Process the script line by line, filtering out comments and empty lines
-    const lines = scriptToRun.split("\n");
-    const commands: string[] = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      // Skip empty lines and comment lines
-      if (trimmed && !trimmed.startsWith("#")) {
-        commands.push(trimmed);
-      }
-    }
-
-    // Execute all commands joined by semicolons
-    const commandString = commands.join("; ");
-    const result = await ctx.exec(commandString);
-    return result;
-  } finally {
-    // Restore environment
-    Object.assign(ctx.env, envBackup);
-    // Remove positional parameters that were added
-    delete ctx.env["0"];
-    scriptArgs.forEach((_, i) => {
-      delete ctx.env[String(i + 1)];
-    });
-    delete ctx.env["#"];
-    delete ctx.env["@"];
-    delete ctx.env["*"];
   }
+
+  // Process the script line by line, filtering out comments and empty lines
+  const lines = scriptToRun.split("\n");
+  const commands: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip empty lines and comment lines
+    if (trimmed && !trimmed.startsWith("#")) {
+      commands.push(trimmed);
+    }
+  }
+
+  // Execute all commands joined by semicolons
+  // Pass positional parameters via the env option
+  const commandString = commands.join("; ");
+  const result = await ctx.exec(commandString, { env: positionalEnv });
+  return result;
 }

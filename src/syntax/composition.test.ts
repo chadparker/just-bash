@@ -73,8 +73,7 @@ EOF`);
     });
 
     it("should use variable expansion in here doc piped to grep", async () => {
-      const env = new BashEnv();
-      await env.exec("export PATTERN=world");
+      const env = new BashEnv({ env: { PATTERN: "world" } });
       const result = await env.exec(`cat <<EOF | grep $PATTERN
 hello world
 goodbye moon

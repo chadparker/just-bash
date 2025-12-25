@@ -1,6 +1,47 @@
 import { describe, expect, it } from "vitest";
 import { BashEnv } from "./BashEnv.js";
 
+// Helper to create a mock clock for testing sleep
+function createMockClock() {
+  const pendingSleeps: Array<{
+    resolve: () => void;
+    triggerAt: number;
+  }> = [];
+  let currentTime = 0;
+
+  return {
+    sleep: (ms: number): Promise<void> => {
+      return new Promise((resolve) => {
+        pendingSleeps.push({ resolve, triggerAt: currentTime + ms });
+      });
+    },
+    advance: (ms: number): void => {
+      currentTime += ms;
+      // Wake up any sleeps that should complete
+      for (let i = pendingSleeps.length - 1; i >= 0; i--) {
+        if (pendingSleeps[i].triggerAt <= currentTime) {
+          pendingSleeps[i].resolve();
+          pendingSleeps.splice(i, 1);
+        }
+      }
+    },
+    get time(): number {
+      return currentTime;
+    },
+    get pendingCount(): number {
+      return pendingSleeps.length;
+    },
+  };
+}
+
+// Helper to wait for async operations (command lazy loading, etc.) to complete
+// Uses multiple iterations to ensure all microtasks and macrotasks complete
+async function tick(times = 50): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
 describe("exec options", () => {
   describe("per-exec env", () => {
     it("should use env vars for single execution", async () => {
@@ -242,6 +283,380 @@ describe("exec options", () => {
 
       // VAR should be restored to original
       expect(env.getEnv().VAR).toBe("original");
+    });
+  });
+
+  describe("sleep command with mock clock", () => {
+    it("should use mock sleep function", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({ sleep: clock.sleep });
+
+      const promise = env.exec("sleep 1");
+
+      // Wait for async command loading
+      await tick();
+
+      // Should be pending
+      expect(clock.pendingCount).toBe(1);
+
+      // Advance clock
+      clock.advance(1000);
+
+      const result = await promise;
+      expect(result.exitCode).toBe(0);
+      expect(clock.pendingCount).toBe(0);
+    });
+
+    it("should parse duration with suffix", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({ sleep: clock.sleep });
+
+      // Start sleep with minute suffix
+      const promise = env.exec("sleep 0.5m");
+
+      await tick();
+      expect(clock.pendingCount).toBe(1);
+
+      // 30 seconds = 0.5 minutes
+      clock.advance(30000);
+
+      const result = await promise;
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should handle multiple sleep arguments", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({ sleep: clock.sleep });
+
+      // GNU sleep sums multiple arguments
+      const promise = env.exec("sleep 1 2");
+
+      await tick();
+      expect(clock.pendingCount).toBe(1);
+
+      // First advance - not enough
+      clock.advance(2000);
+      await tick();
+      expect(clock.pendingCount).toBe(1);
+
+      // Second advance completes
+      clock.advance(1000);
+
+      const result = await promise;
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe("concurrent execution with sleep (mock clock)", () => {
+    it("multiple concurrent sleeps should all complete independently", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({ sleep: clock.sleep });
+
+      // Start three sleeps with different durations
+      const p1 = env.exec("sleep 1; echo done1");
+      const p2 = env.exec("sleep 2; echo done2");
+      const p3 = env.exec("sleep 3; echo done3");
+
+      await tick();
+      expect(clock.pendingCount).toBe(3);
+
+      // Advance 1 second - first should complete
+      clock.advance(1000);
+      const r1 = await p1;
+      expect(r1.stdout).toBe("done1\n");
+      expect(clock.pendingCount).toBe(2);
+
+      // Advance another second - second should complete
+      clock.advance(1000);
+      const r2 = await p2;
+      expect(r2.stdout).toBe("done2\n");
+      expect(clock.pendingCount).toBe(1);
+
+      // Advance final second - third should complete
+      clock.advance(1000);
+      const r3 = await p3;
+      expect(r3.stdout).toBe("done3\n");
+      expect(clock.pendingCount).toBe(0);
+    });
+
+    it("concurrent execs with per-exec env should be isolated during sleep", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        env: { SHARED: "original" },
+      });
+
+      // Start concurrent commands with different env
+      const p1 = env.exec('sleep 1; echo "A=$A SHARED=$SHARED"', {
+        env: { A: "value_A" },
+      });
+      const p2 = env.exec('sleep 1; echo "B=$B SHARED=$SHARED"', {
+        env: { B: "value_B" },
+      });
+
+      await tick();
+      expect(clock.pendingCount).toBe(2);
+
+      // Advance clock to complete both
+      clock.advance(1000);
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+
+      // Each should see their own env, not the other's
+      expect(r1.stdout).toBe("A=value_A SHARED=original\n");
+      expect(r2.stdout).toBe("B=value_B SHARED=original\n");
+    });
+
+    it("state modifications during concurrent sleep should be isolated", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        env: { VAR: "initial" },
+      });
+
+      // Command 1: modify VAR then sleep
+      const p1 = env.exec("export VAR=modified; sleep 2; echo $VAR", {
+        env: { MARKER: "1" },
+      });
+
+      // Command 2: read VAR immediately (before p1's sleep completes)
+      const p2 = env.exec("sleep 1; echo $VAR", { env: { MARKER: "2" } });
+
+      await tick();
+      expect(clock.pendingCount).toBe(2);
+
+      // Advance 1 second - p2 completes first
+      clock.advance(1000);
+      const r2 = await p2;
+      // p2 should see isolated copy of initial env, not p1's modification
+      expect(r2.stdout).toBe("initial\n");
+
+      // Advance another second - p1 completes
+      clock.advance(1000);
+      const r1 = await p1;
+      // p1 should see its own modification
+      expect(r1.stdout).toBe("modified\n");
+
+      // Original env should be unchanged
+      expect(env.getEnv().VAR).toBe("initial");
+    });
+
+    it("high concurrency stress test", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        env: { BASE: "shared" },
+      });
+
+      // Start 10 concurrent commands
+      const promises = [];
+      for (let i = 0; i < 10; i++) {
+        promises.push(
+          env.exec(`sleep ${i % 3}; echo "ID=$ID BASE=$BASE"`, {
+            env: { ID: String(i) },
+          }),
+        );
+      }
+
+      await tick();
+      expect(clock.pendingCount).toBe(10);
+
+      // Advance clock to complete all
+      clock.advance(2000);
+
+      const results = await Promise.all(promises);
+
+      // Verify each result has correct isolated env
+      for (let i = 0; i < 10; i++) {
+        expect(results[i].stdout).toBe(`ID=${i} BASE=shared\n`);
+        expect(results[i].exitCode).toBe(0);
+      }
+
+      // Original env unchanged
+      expect(env.getEnv().BASE).toBe("shared");
+      expect(env.getEnv().ID).toBeUndefined();
+    });
+
+    it("interleaved operations: file writes during concurrent sleeps", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        files: { "/data/base.txt": "base" },
+      });
+
+      // Command 1: write to file then sleep
+      const p1 = env.exec(
+        'echo "from_p1" > /data/p1.txt; sleep 2; cat /data/p1.txt',
+        { env: { CMD: "1" } },
+      );
+
+      // Command 2: write different file then sleep
+      const p2 = env.exec(
+        'echo "from_p2" > /data/p2.txt; sleep 1; cat /data/p2.txt',
+        { env: { CMD: "2" } },
+      );
+
+      await tick();
+      expect(clock.pendingCount).toBe(2);
+
+      // Advance 1 second
+      clock.advance(1000);
+      const r2 = await p2;
+      expect(r2.stdout).toBe("from_p2\n");
+
+      // Advance another second
+      clock.advance(1000);
+      const r1 = await p1;
+      expect(r1.stdout).toBe("from_p1\n");
+
+      // Both files should exist (fs is shared, not isolated)
+      const checkP1 = await env.exec("cat /data/p1.txt");
+      const checkP2 = await env.exec("cat /data/p2.txt");
+      expect(checkP1.stdout).toBe("from_p1\n");
+      expect(checkP2.stdout).toBe("from_p2\n");
+    });
+
+    it("concurrent cwd changes should be isolated", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        cwd: "/home",
+        files: {
+          "/home/file.txt": "home",
+          "/tmp/file.txt": "tmp",
+          "/var/file.txt": "var",
+        },
+      });
+
+      // Three commands with different cwd
+      const p1 = env.exec("sleep 1; pwd; cat file.txt", { cwd: "/home" });
+      const p2 = env.exec("sleep 1; pwd; cat file.txt", { cwd: "/tmp" });
+      const p3 = env.exec("sleep 1; pwd; cat file.txt", { cwd: "/var" });
+
+      await tick();
+      expect(clock.pendingCount).toBe(3);
+      clock.advance(1000);
+
+      const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+      expect(r1.stdout).toBe("/home\nhome");
+      expect(r2.stdout).toBe("/tmp\ntmp");
+      expect(r3.stdout).toBe("/var\nvar");
+
+      // Original cwd should be unchanged
+      expect(env.getCwd()).toBe("/home");
+    });
+
+    it("function definitions should not leak between isolated execs", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+      });
+
+      // Command 1: define a function in isolated context
+      const p1 = env.exec("myfunc() { echo from_p1; }; sleep 1; myfunc", {
+        env: { MARKER: "1" },
+      });
+
+      // Command 2: try to call that function (should fail)
+      const p2 = env.exec("sleep 2; myfunc 2>&1 || echo not_found", {
+        env: { MARKER: "2" },
+      });
+
+      await tick();
+      clock.advance(1000);
+      const r1 = await p1;
+      expect(r1.stdout).toBe("from_p1\n");
+
+      clock.advance(1000);
+      const r2 = await p2;
+      // Function should not be visible in isolated context
+      expect(r2.stdout).toContain("not_found");
+    });
+
+    it("shell options should not leak between isolated execs", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+      });
+
+      // Command 1: set errexit in isolated context
+      const p1 = env.exec("set -e; sleep 1; false; echo should_not_see", {
+        env: { MARKER: "1" },
+      });
+
+      // Command 2: run failing command without errexit
+      const p2 = env.exec("sleep 2; false; echo should_see", {
+        env: { MARKER: "2" },
+      });
+
+      await tick();
+      clock.advance(1000);
+      const r1 = await p1;
+      expect(r1.stdout).toBe(""); // errexit stopped execution
+      expect(r1.exitCode).toBe(1);
+
+      clock.advance(1000);
+      const r2 = await p2;
+      expect(r2.stdout).toBe("should_see\n"); // no errexit
+      expect(r2.exitCode).toBe(0);
+    });
+
+    it("each exec is isolated even without per-exec options", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        env: { COUNTER: "0" },
+      });
+
+      // Each exec is like a new shell - state is never shared
+      const p1 = env.exec("export COUNTER=from_p1; sleep 1; echo done1");
+      const p2 = env.exec("sleep 2; echo $COUNTER");
+
+      await tick();
+      clock.advance(1000);
+      await p1;
+
+      clock.advance(1000);
+      const r2 = await p2;
+
+      // p2 sees original value because each exec is isolated
+      expect(r2.stdout).toBe("0\n");
+    });
+
+    it("race condition test: many concurrent modifications", async () => {
+      const clock = createMockClock();
+      const env = new BashEnv({
+        sleep: clock.sleep,
+        env: { ORIGINAL: "unchanged" },
+      });
+
+      // Start many concurrent execs that try to modify state
+      const promises = [];
+      for (let i = 0; i < 20; i++) {
+        promises.push(
+          env.exec(`export NEW_VAR_${i}=value; sleep 0.1; echo $ORIGINAL`, {
+            env: { INDEX: String(i) },
+          }),
+        );
+      }
+
+      await tick();
+      // Advance clock
+      clock.advance(100);
+      const results = await Promise.all(promises);
+
+      // All should see the original value
+      for (const result of results) {
+        expect(result.stdout).toBe("unchanged\n");
+      }
+
+      // Original env should be completely unchanged
+      expect(env.getEnv().ORIGINAL).toBe("unchanged");
+      // None of the NEW_VAR_X should exist
+      for (let i = 0; i < 20; i++) {
+        expect(env.getEnv()[`NEW_VAR_${i}`]).toBeUndefined();
+      }
     });
   });
 });
