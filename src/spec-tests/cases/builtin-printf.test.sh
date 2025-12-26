@@ -1510,7 +1510,6 @@ hex uppercase
 ## END
 
 #### leading spaces are accepted in value given to %d %X, but not trailing spaces
-## SKIP: 64-bit printf unsigned/octal/hex not implemented
 
 case $SH in zsh) exit ;; esac
 

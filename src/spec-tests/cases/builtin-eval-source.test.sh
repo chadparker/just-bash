@@ -37,7 +37,6 @@ echo $?
 ## END
 
 #### eval string with 'break continue return error'
-## SKIP: Oils-specific shopt options not implemented
 
 set -e
 

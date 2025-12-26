@@ -3,20 +3,18 @@
 # Miscellaneous tests for the command language.
 
 #### Command block
-## SKIP: which command not implemented
 PATH=/bin
 
 { which ls; }
 ## stdout: /bin/ls
 
 #### Permission denied
-## SKIP: Permission denied execution not implemented
+## SKIP: Permission denied execution not implemented (returns 127 instead of 126)
 touch $TMP/text-file
 $TMP/text-file
 ## status: 126
 
 #### Not a dir
-## SKIP: Permission denied execution not implemented
 $TMP/not-a-dir/text-file
 ## status: 127
 

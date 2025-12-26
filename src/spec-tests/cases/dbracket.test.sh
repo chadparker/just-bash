@@ -445,7 +445,6 @@ bang 0
 
 
 #### \(\) in pattern (regression)
-## SKIP: extglob not implemented
 if [[ 'foo()' == *\(\) ]]; then echo match1; fi
 if [[ 'foo()' == *'()' ]]; then echo match2; fi
 if [[ 'foo()' == '*()' ]]; then echo match3; fi

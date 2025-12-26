@@ -239,7 +239,6 @@ target
 ## stderr-json: ""
 
 #### Test the current directory after 'cd ..' involving symlinks
-## SKIP: Symbolic links (ln -s) not implemented
 dir=$TMP/symlinktest
 mkdir -p $dir
 cd $dir

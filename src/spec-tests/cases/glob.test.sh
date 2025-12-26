@@ -103,7 +103,6 @@ echo _tmp/*.[[:punct:]E]
 ## BUG mksh stdout: _tmp/*.[[:punct:]E]
 
 #### glob double quotes
-## SKIP: Glob with escaped special characters not implemented
 # note: mksh doesn't support [[:punct:]] ?
 touch _tmp/\"quoted.py\"
 echo _tmp/\"*.py\"
@@ -165,7 +164,6 @@ _tmp/spec-tmp/*.zz
 ## END
 
 #### set -o noglob (bug #698)
-## SKIP: noglob (set -f) not implemented
 var='\z'
 set -f
 echo $var
@@ -214,7 +212,6 @@ _[^[z] _[^]z]
 ## END
 
 #### PatSub of unescaped [[] and []]
-## SKIP: Parameter expansion backslash edge cases not implemented
 x='[foo]'
 echo ${x//[\[z]/<}  # the right way to do it
 echo ${x//[\]z]/>}
@@ -230,7 +227,6 @@ echo ${x//[]z]/>}
 ## N-I dash status: 2
 
 #### PatSub of negated unescaped [[] and []]
-## SKIP: Parameter expansion backslash edge cases not implemented
 x='[foo]'
 echo ${x//[^\[z]/<}  # the right way to do it
 echo ${x//[^\]z]/>}
@@ -348,7 +344,6 @@ echo "$v"
 
 
 #### \ in unquoted substitutions is preserved with set -o noglob
-## SKIP: noglob (set -f) not implemented
 set -f
 v='*\*.txt'
 echo $v

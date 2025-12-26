@@ -19,6 +19,8 @@ export interface TestResult {
   passed: boolean;
   skipped: boolean;
   skipReason?: string;
+  /** Test was expected to fail (## SKIP) but unexpectedly passed */
+  unexpectedPass?: boolean;
   actualStdout?: string;
   actualStderr?: string;
   actualStatus?: number;
@@ -44,16 +46,11 @@ export async function runTestCase(
   testCase: TestCase,
   options: RunOptions = {},
 ): Promise<TestResult> {
-  // Check if test should be skipped
-  if (testCase.skip) {
-    return {
-      testCase,
-      passed: true,
-      skipped: true,
-      skipReason: testCase.skip,
-    };
-  }
+  // Track if test is expected to fail (## SKIP) - we'll still run it
+  const expectedToFail = !!testCase.skip;
+  const skipReason = testCase.skip;
 
+  // These are true skips - we can't run these tests at all
   if (isNotImplementedForBash(testCase)) {
     return {
       testCase,
@@ -168,6 +165,39 @@ export async function runTestCase(
       }
     }
 
+    // Handle ## SKIP tests: if expected to fail but actually passed, that's an unexpected pass
+    if (expectedToFail) {
+      if (passed) {
+        // Test was expected to fail but passed - report as failure so we can unskip it
+        return {
+          testCase,
+          passed: false,
+          skipped: false,
+          unexpectedPass: true,
+          actualStdout: result.stdout,
+          actualStderr: result.stderr,
+          actualStatus: result.exitCode,
+          expectedStdout,
+          expectedStderr,
+          expectedStatus,
+          error: `UNEXPECTED PASS: This test was marked ## SKIP (${skipReason}) but now passes. Please remove the ## SKIP directive.`,
+        };
+      }
+      // Test was expected to fail and did fail - that's fine, mark as skipped
+      return {
+        testCase,
+        passed: true,
+        skipped: true,
+        skipReason: `## SKIP: ${skipReason}`,
+        actualStdout: result.stdout,
+        actualStderr: result.stderr,
+        actualStatus: result.exitCode,
+        expectedStdout,
+        expectedStderr,
+        expectedStatus,
+      };
+    }
+
     return {
       testCase,
       passed,
@@ -181,6 +211,16 @@ export async function runTestCase(
       error: errors.length > 0 ? errors.join("\n") : undefined,
     };
   } catch (e) {
+    // If test was expected to fail and threw an error, that counts as expected failure
+    if (expectedToFail) {
+      return {
+        testCase,
+        passed: true,
+        skipped: true,
+        skipReason: `## SKIP: ${skipReason}`,
+        error: `Execution error (expected): ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
     return {
       testCase,
       passed: false,

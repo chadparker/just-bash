@@ -24,7 +24,6 @@ status=0
 ## END
 
 #### $% is not a parse error
-## SKIP: Parse error detection edge cases not implemented
 echo $%
 ## stdout: $%
 
@@ -71,7 +70,6 @@ do echo hi
 ## OK mksh status: 1
 
 #### } is a parse error
-## SKIP: Parse error detection edge cases not implemented
 }
 echo should not get here
 ## stdout-json: ""
@@ -169,7 +167,7 @@ $SH $flags -i -c 'var=)'
 ## OK mksh status: 1
 
 #### array literal inside array is a parse error
-## SKIP: Parse error detection edge cases not implemented
+## SKIP: Nested array literal parse error not detected
 a=( inside=() )
 echo len=${#a[@]}
 ## status: 2
@@ -179,7 +177,6 @@ echo len=${#a[@]}
 ## BUG bash stdout: len=0
 
 #### array literal inside loop is a parse error
-## SKIP: Parse error detection edge cases not implemented
 f() {
   for x in a=(); do
     echo x=$x
@@ -205,7 +202,6 @@ f
 ## OK mksh status: 1
 
 #### %foo=() is parse error (regression)
-## SKIP: Parse error detection edge cases not implemented
 
 # Lit_VarLike and then (, but NOT at the beginning of a word.
 

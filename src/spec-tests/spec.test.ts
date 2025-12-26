@@ -163,6 +163,12 @@ function truncateScript(script: string, maxLen = 60): string {
 function formatError(result: Awaited<ReturnType<typeof runTestCase>>): string {
   const lines: string[] = [];
 
+  // Show error message first (especially important for UNEXPECTED PASS)
+  if (result.error) {
+    lines.push(result.error);
+    lines.push("");
+  }
+
   if (result.expectedStdout !== null || result.actualStdout !== undefined) {
     lines.push("STDOUT:");
     lines.push(`  expected: ${JSON.stringify(result.expectedStdout ?? "")}`);

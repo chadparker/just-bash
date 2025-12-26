@@ -62,7 +62,6 @@ echo ${foo: -4:3}
 ## BUG mksh stdout: -μ
 
 #### Negative second arg is position, not length!
-## SKIP: Right brace in parameter default value not implemented
 foo=abcdefg
 echo ${foo:3:-1} ${foo: 3: -2} ${foo:3 :-3 }
 ## stdout: def de d

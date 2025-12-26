@@ -2,7 +2,6 @@
 ## oils_failures_allowed: 0
 
 #### Lazy Evaluation of Alternative
-## SKIP: Right brace in parameter default value not implemented
 i=0
 x=x
 echo ${x:-$((i++))}
@@ -303,7 +302,6 @@ argv.py ${!hooksSlice+"${!hooksSlice}"}
 ## END
 
 #### ${v-foo} and ${v:-foo} when set -u
-## SKIP: Right brace in parameter default value not implemented
 set -u
 v=v
 echo v=${v:-foo}
@@ -397,7 +395,6 @@ a1=
 ## N-I zsh status: 1
 
 #### $@ (empty) and - and +
-## SKIP: Right brace in parameter default value not implemented
 echo argv=${@-minus}
 echo argv=${@+plus}
 echo argv=${@:-minus}
@@ -416,7 +413,6 @@ argv=
 ## END
 
 #### $@ ("") and - and +
-## SKIP: Right brace in parameter default value not implemented
 set -- ""
 echo argv=${@-minus}
 echo argv=${@+plus}
@@ -440,7 +436,6 @@ argv=plus
 ## END
 
 #### $@ ("" "") and - and +
-## SKIP: Right brace in parameter default value not implemented
 set -- "" ""
 echo argv=${@-minus}
 echo argv=${@+plus}
@@ -475,7 +470,6 @@ argv=
 ## END
 
 #### "$*" ("" "") and - and + (IFS=)
-## SKIP: Right brace in parameter default value not implemented
 set -- "" ""
 IFS=
 echo "argv=${*-minus}"
@@ -601,7 +595,6 @@ echo ${#arr[@]}
 ## N-I mksh stdout-json: ""
 
 #### "\z" as arg
-## SKIP: Complex quoting in backticks not implemented
 echo "${undef-\$}"
 echo "${undef-\(}"
 echo "${undef-\z}"

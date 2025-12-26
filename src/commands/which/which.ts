@@ -33,8 +33,6 @@ export const whichCommand: Command = {
         showAll = true;
         silent = true;
       } else if (arg.startsWith("-") && arg !== "-") {
-        // Unknown option - ignore like real which
-        continue;
       } else {
         names.push(arg);
       }

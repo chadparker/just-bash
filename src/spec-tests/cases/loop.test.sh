@@ -212,7 +212,6 @@ subshell status=0
 ## END
 
 #### continue in subshell aborts with errexit
-## SKIP: errexit in compound commands/pipelines not implemented
 # The other shells don't let you recover from this programming error!
 set -o errexit
 for i in $(seq 2); do

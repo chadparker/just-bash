@@ -93,14 +93,13 @@ echo "status=$?"
 ## OK dash status: 2
 
 #### Redirect echo to stderr, and then redirect all of stdout somewhere.
-## SKIP: Braced group with internal fd redirects not implemented
+## SKIP: Stderr output inside command block with stdout redirect not working
 { echo foo52 1>&2; echo 012345789; } > $TMP/block-stdout.txt
 cat $TMP/block-stdout.txt |  wc -c 
 ## stderr: foo52
 ## stdout: 10
 
 #### Named file descriptor
-## SKIP: File descriptor variable syntax ({fd}>file) not implemented
 exec {myfd}> $TMP/named-fd.txt
 echo named-fd-contents >& $myfd
 cat $TMP/named-fd.txt
@@ -110,7 +109,6 @@ cat $TMP/named-fd.txt
 ## N-I dash/mksh status: 127
 
 #### Double digit fd (20> file)
-## SKIP: Advanced file descriptor redirections not implemented
 exec 20> "$TMP/double-digit-fd.txt"
 echo hello20 >&20
 cat "$TMP/double-digit-fd.txt"
@@ -146,7 +144,6 @@ echo hello
 ## N-I dash status: 2
 
 #### 3>&- << EOF (OSH regression: fail to restore fds)
-## SKIP: File descriptor close/move syntax (>&-) not implemented
 exec 3> "$TMP/fd.txt"
 echo hello 3>&- << EOF
 EOF
@@ -159,7 +156,6 @@ world
 ## END
 
 #### Open file on descriptor 3 and write to it many times
-## SKIP: File descriptor close/move syntax (>&-) not implemented
 
 # different than case below because 3 is the likely first FD of open()
 
@@ -174,7 +170,6 @@ world
 ## END
 
 #### Open file on descriptor 4 and write to it many times
-## SKIP: File descriptor close/move syntax (>&-) not implemented
 
 # different than the case above because because 4 isn't the likely first FD
 
@@ -228,7 +223,6 @@ echo hi 1>&7
 ## OK dash status: 2
 
 #### Open descriptor with exec
-## SKIP: Advanced file descriptor redirections not implemented
 # What is the point of this?  ./configure scripts and debootstrap use it.
 exec 3>&1
 echo hi 1>&3
@@ -236,7 +230,6 @@ echo hi 1>&3
 ## status: 0
 
 #### Open multiple descriptors with exec
-## SKIP: Advanced file descriptor redirections not implemented
 # What is the point of this?  ./configure scripts and debootstrap use it.
 exec 3>&1
 exec 4>&1

@@ -80,7 +80,6 @@ echo ${PIPESTATUS[@]}
 ## END
 
 #### PIPESTATUS is set on simple commands
-## SKIP: PIPESTATUS variable not implemented
 case $SH in dash|zsh) exit ;; esac
 
 false

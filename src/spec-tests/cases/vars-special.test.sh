@@ -283,7 +283,6 @@ status=0
 ## END
 
 #### $$ doesn't change with subshell or command sub
-## SKIP: errexit in compound commands/pipelines not implemented
 # Just test that it has decimal digits
 set -o errexit
 die() {
@@ -574,7 +573,6 @@ hi world
 ## END
 
 #### $_ and ${_}
-## SKIP: $_ with declare/colon builtin not implemented
 case $SH in dash|mksh) exit ;; esac
 
 _var=value

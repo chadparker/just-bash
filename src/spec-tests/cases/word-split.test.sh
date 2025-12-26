@@ -440,7 +440,6 @@ argv.py ${word}z
 ## END
 
 #### Bug #698, similar crash
-## SKIP: noglob (set -f) not implemented
 var='\'
 set -f
 echo $var
@@ -893,7 +892,6 @@ echo "${#v}"
 
 
 #### Regression: "${v:-AxBxC}"x should not be split
-## SKIP: Right brace in parameter default value not implemented
 IFS=x
 v=
 echo "${v:-AxBxC}"

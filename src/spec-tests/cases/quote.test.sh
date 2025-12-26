@@ -145,7 +145,6 @@ by semi-colon
 #
 
 #### No tab escapes within single quotes
-## SKIP: which command not implemented
 # dash and mksh allow this, which is a BUG.
 # POSIX says: "Enclosing characters in single-quotes ( '' ) shall preserve the
 # literal value of each character within the single-quotes. A single-quote
@@ -215,7 +214,6 @@ echo $w $x $y
 ## N-I dash/mksh stdout-json: ""
 
 #### YSH allows unquoted foo\ bar too
-## SKIP: Oils-specific shopt options not implemented
 shopt -s ysh:all
 touch foo\ bar
 ls foo\ bar

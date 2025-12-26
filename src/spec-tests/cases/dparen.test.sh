@@ -67,7 +67,6 @@ values = 0
 ## N-I zsh stdout-json: ""
 
 #### bash: K in (( A[K] = V )) is a constant string
-## SKIP: Associative array arithmetic assignment edge cases not implemented
 K=5
 V=42
 typeset -A A
@@ -89,7 +88,6 @@ values = 42
 ## N-I mksh stdout-json: ""
 
 #### BUG: (( V = A[K] )) doesn't retrieve the right value
-## SKIP: Associative array value coercion in arithmetic not implemented
 typeset -A A
 K=5
 V=42

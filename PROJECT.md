@@ -260,10 +260,6 @@ xargs — build argument lists
   - But only read files from disk once the user actually wants to read them
 - Make this a new directory
 
-## All before this is done
-
-Woohoo
-
 ## Implementation phase 19
 
 Find documentation for all bash commannds and builtins, grammar, functionality, semantics, etc. ideally in markdown or text or similar form and copy it into /tmp/official-bash-docs/$sourceDomain
@@ -271,3 +267,7 @@ Find documentation for all bash commannds and builtins, grammar, functionality, 
 ## Implementation phase 20
 
 - Implement which and proper PATH to resolve commands
+
+## All before this is done
+
+Woohoo

@@ -267,7 +267,6 @@ eggs
 
 
 #### Modify a temporary binding
-## SKIP: Temp binding edge cases not implemented
 # (regression for bug found by Michael Greenberg)
 f() {
   echo "x before = $x"
@@ -375,7 +374,6 @@ x=global
 ## END
 
 #### Using ${x-default} after unsetting local shadowing a global
-## SKIP: Right brace in parameter default value not implemented
 f() {
   echo "x=$x"
   local x='local'
@@ -635,7 +633,6 @@ STDERR
 ## END
 
 #### redirect after declare -p
-## SKIP: which command not implemented
 case $SH in *dash) exit 99 ;; esac  # stderr unpredictable
 
 foo=bar

@@ -214,7 +214,6 @@ true
 ## END
 
 #### operator/operand ambiguity with ]
-## SKIP: which command not implemented
 # bash parses this as '-z' AND ']', which is true.  It's a syntax error in
 # dash/mksh.
 [ -z -a ] ]
@@ -530,7 +529,6 @@ status=2
 ## END
 
 #### -nt -ot
-## SKIP: File time/inode comparison (-ot, -nt, -ef) not implemented
 [ present -nt absent ] || exit 1
 [ absent -ot present ] || exit 2
 ## status: 1
@@ -557,7 +555,6 @@ different
 ## END
 
 #### Overflow error
-## SKIP: 64-bit integer edge cases not implemented
 test -t 12345678910
 echo status=$?
 ## STDOUT:

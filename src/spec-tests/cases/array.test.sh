@@ -76,14 +76,12 @@ argv.py "${a[3]}"
 ## stdout: ['']
 
 #### Negative index
-## SKIP: Right brace in parameter default value not implemented
 a=(1 '2 3')
 argv.py "${a[-1]}" "${a[-2]}" "${a[-5]}"  # last one out of bounds
 ## stdout: ['2 3', '1', '']
 ## N-I mksh stdout: ['', '', '']
 
 #### Negative index and sparse array
-## SKIP: Right brace in parameter default value not implemented
 a=(0 1 2 3 4)
 unset a[1]
 unset a[4]
@@ -121,7 +119,6 @@ echo ${a[@]}
 ## END
 
 #### Negative index and sparse array
-## SKIP: Right brace in parameter default value not implemented
 a=(0 1)
 unset 'a[-1]'  # remove last element
 a+=(2 3)
@@ -854,7 +851,6 @@ bash: line 2: a[-1]: bad array subscript
 
 
 #### Regression: Negative index in [[ -v a[index] ]]
-## SKIP: Array negative index error messages with line numbers not implemented
 a[0]=x
 a[5]=y
 a[10]=z
@@ -942,7 +938,6 @@ bash: line 4: unset: [-2]: bad array subscript
 
 
 #### Regression: Out-of-bound negative offset for ${a[@]:offset}
-## SKIP: Right brace in parameter default value not implemented
 case $SH in mksh) exit ;; esac
 
 a=(1 2 3 4)

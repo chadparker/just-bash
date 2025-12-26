@@ -18,7 +18,6 @@ echo done
 ## status: 127
 
 #### errexit aborts early on pipeline
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 echo hi | grep nonexistent
 echo two
@@ -26,7 +25,6 @@ echo two
 ## status: 1
 
 #### errexit with { }
-## SKIP: errexit in compound commands/pipelines not implemented
 # This aborts because it's not part of an if statement.
 set -o errexit
 { echo one; false; echo two; }
@@ -34,7 +32,6 @@ set -o errexit
 ## status: 1
 
 #### errexit with if and { }
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 if { echo one; false; echo two; }; then
   echo three
@@ -167,7 +164,6 @@ echo done
 ## N-I dash/ash stdout-json: ""
 
 #### errexit with subshell
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 ( echo one; false; echo two; )
 echo three
@@ -177,7 +173,6 @@ one
 ## END
 
 #### set -o errexit while it's being ignored (moot with strict_errexit)
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 # osh aborts early here
 if { echo 1; false; echo 2; set -o errexit; echo 3; false; echo 4; }; then
@@ -197,7 +192,6 @@ echo 7
 ## END
 
 #### set +o errexit while it's being ignored (moot with strict_errexit)
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 if { echo 1; false; echo 2; set +o errexit; echo 3; false; echo 4; }; then
   echo 5;
@@ -216,7 +210,6 @@ echo 7
 ## END
 
 #### set +o errexit with 2 levels of ignored
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 if { echo 1; ! set +o errexit; echo 2; }; then
   echo 3
@@ -248,7 +241,6 @@ echo 6
 ## END
 
 #### set errexit while it's ignored in a subshell (moot with strict_errexit)
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 if ( echo 1; false; echo 2; set -o errexit; echo 3; false; echo 4 ); then
   echo 5;
@@ -278,7 +270,6 @@ one
 ## END
 
 #### errexit double guard
-## SKIP: errexit in compound commands/pipelines not implemented
 # OSH bug fix.  ErrExit needs a counter, not a boolean.
 set -o errexit
 if { ! false; false; true; } then
@@ -292,7 +283,6 @@ true
 ## END
 
 #### background processes respect errexit
-## SKIP: errexit in compound commands/pipelines not implemented
 set -o errexit
 { echo one; false; echo two; exit 42; } &
 wait $!

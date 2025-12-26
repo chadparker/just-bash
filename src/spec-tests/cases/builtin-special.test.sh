@@ -164,7 +164,6 @@ sh func echo hi
 ## END
 
 #### Non-special builtins CAN be redefined as functions
-## SKIP: POSIX mode (set -o posix) not implemented
 test -n "$BASH_VERSION" && set -o posix
 true() {
   echo 'true func'

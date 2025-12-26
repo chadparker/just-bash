@@ -50,7 +50,6 @@ echo -{\X"b",'cd'}-
 ## stdout: -Xb- -cd-
 
 #### expansion with simple var
-## SKIP: Brace expansion with variables order not implemented
 a=A
 echo -{$a,b}-
 ## stdout: -A- -b-

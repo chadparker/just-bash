@@ -24,7 +24,7 @@ The `shopt -s globskipdots` option is not implemented.
 
 ## Builtins
 
-### read options (39 tests)
+### read options (24 tests)
 Advanced `read` options are not implemented:
 - `-n N` / `-N N` - read N characters
 - `-d delim` - custom delimiter
@@ -44,9 +44,6 @@ The `hash` builtin for managing the command hash table is not implemented.
 
 ### history (29 tests)
 The `history` builtin and history expansion are not implemented.
-
-### which (31 tests)
-The `which` command is not implemented (use `command -v` instead).
 
 ## Variables
 
@@ -72,10 +69,11 @@ Automatic file descriptor allocation with `{fd}>file` syntax is not implemented.
 ### Close/move syntax (8 tests)
 File descriptor close (`>&-`, `<&-`) and move (`>&N-`) syntax is not implemented.
 
-### Advanced redirections (9 tests)
+### Advanced redirections (10 tests)
 - `exec N<file` - opening specific file descriptors
 - `N<&M` - duplicating file descriptors
 - Read-write mode `<>` (3 tests)
+- Stderr output inside command block with stdout redirect (1 test)
 
 ### FD propagation (1 test)
 File descriptor inheritance across statements is not fully implemented.
@@ -91,8 +89,11 @@ Symlink operations including:
 ### File time comparison (3 tests)
 `-ot` (older than), `-nt` (newer than), `-ef` (same file) test operators are not implemented.
 
-### Permission denied execution (2 tests)
-Execution permission checking for scripts is not fully implemented.
+### Permission denied execution (3 tests)
+Execution permission checking for scripts is not fully implemented. Returns exit code 127 instead of 126.
+
+### Ambiguous redirect (1 test)
+Redirect to `"$@"` with multiple arguments should produce "ambiguous redirect" error.
 
 ## Arithmetic
 
@@ -115,7 +116,7 @@ Comments inside `$((...))` are not supported.
 
 ## Parameter Expansion
 
-### Right brace in default value (75 tests)
+### Right brace in default value (54 tests)
 Complex parameter expansions with `}` in default values like `${x:-a}b}` have parsing limitations.
 
 ### ${@:0:N} slice (5 tests)
@@ -146,7 +147,7 @@ Complex escaped braces in expansion are not handled.
 
 ## Control Flow
 
-### errexit in compound commands (21 tests)
+### errexit in compound commands (9 tests)
 `set -e` (errexit) doesn't interact correctly with:
 - Brace groups `{ }`
 - Pipelines
@@ -206,8 +207,11 @@ The `%(format)T` strftime format is not implemented.
 
 ## Parsing
 
-### Parse error detection (16 tests)
+### Parse error detection (11 tests)
 Some parse error messages and detection differ from bash.
+
+### Nested array literal (1 test)
+`a=( inside=() )` should be a parse error but is not detected.
 
 ### Newlines in compound lists (1 test)
 Newline handling in some compound command contexts.

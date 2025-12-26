@@ -46,7 +46,6 @@ echo ~nonexistent
 ## OK zsh status: 1
 
 #### ${undef:-~}
-## SKIP: Right brace in parameter default value not implemented
 HOME=/home/bar
 echo ${undef:-~}
 echo ${HOME:+~/z}

@@ -254,7 +254,6 @@ echo -"${var#'a'}"-
 ## END
 
 #### / operator with single quoted arg (causes syntax error in regex in OSH, reported by Crestwave)
-## SKIP: Right brace in parameter default value not implemented
 var="++--''++--''"
 echo no plus or minus "${var//[+-]}"
 echo no plus or minus "${var//['+-']}"
@@ -284,7 +283,6 @@ a[[[---]]]b
 ## N-I dash status: 2
 
 #### comparison: :- operator with single quoted arg
-## SKIP: Right brace in parameter default value not implemented
 echo ${unset:-'a'}
 echo "${unset:-'a'}"
 ## STDOUT:
@@ -351,7 +349,6 @@ f
 
 
 #### Var substitution with \n in value
-## SKIP: Right brace in parameter default value not implemented
 echo "${var-a\nb}"
 echo "${var:-c\nd}"
 var=val

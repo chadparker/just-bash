@@ -97,7 +97,6 @@ should not get here
 ## N-I bash/mksh/zsh status: 0
 
 #### Integer constant parsing
-## SKIP: Comments in arithmetic expansion not implemented
 echo $(( 0x12A ))
 echo $(( 0x0A ))
 echo $(( 0777 ))
@@ -348,14 +347,12 @@ echo $((array[1] + array[2]*3))
 ## N-I dash stdout-json: ""
 
 #### Constants in base 36
-## SKIP: Comments in arithmetic expansion not implemented
 echo $((36#a))-$((36#z))
 ## stdout: 10-35
 ## N-I dash stdout-json: ""
 ## N-I dash status: 2
 
 #### Constants in bases 2 to 64
-## SKIP: which command not implemented
 # This is a truly bizarre syntax.  Oh it comes from zsh... which allows 36.
 echo $((64#a))-$((64#z)), $((64#A))-$((64#Z)), $((64#@)), $(( 64#_ ))
 ## stdout: 10-35, 36-61, 62, 63
@@ -365,14 +362,12 @@ echo $((64#a))-$((64#z)), $((64#A))-$((64#Z)), $((64#@)), $(( 64#_ ))
 ## N-I mksh/zsh status: 1
 
 #### Multiple digit constants with base N
-## SKIP: Comments in arithmetic expansion not implemented
 echo $((10#0123)), $((16#1b))
 ## stdout: 123, 27
 ## N-I dash stdout-json: ""
 ## N-I dash status: 2
 
 #### Dynamic base constants
-## SKIP: Comments in arithmetic expansion not implemented
 base=16
 echo $(( ${base}#a ))
 ## stdout: 10
@@ -459,7 +454,6 @@ max positive = 2147483647
 ## END
 
 #### More 64-bit ops
-## SKIP: 64-bit integer edge cases not implemented
 case $SH in dash) exit ;; esac
 
 #shopt -s strict_arith
@@ -572,7 +566,6 @@ echo $(( 3 ** 2 ))
 ## N-I mksh status: 1
 
 #### Exponentiation operator has buggy precedence
-## SKIP: which command not implemented
 # NOTE: All shells agree on this, but R and Python give -9, which is more
 # mathematically correct.
 echo $(( -3 ** 2 ))
@@ -629,7 +622,6 @@ echo $((array + 5))
 ## N-I mksh/zsh stdout-json: ""
 
 #### Add integer to associative array (a[0] decay)
-## SKIP: Associative array value coercion in arithmetic not implemented
 typeset -A assoc
 assoc[0]=42
 echo $((assoc + 5))
@@ -691,7 +683,6 @@ declared
 ## N-I dash stdout-json: ""
 
 #### comma operator
-## SKIP: which command not implemented
 a=(4 5 6)
 
 # zsh and osh can't evaluate the array like that

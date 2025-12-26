@@ -32,7 +32,6 @@ argv.py "status=$?" "$REPLY"
 ## status: 0
 
 #### read /dev/null
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 read -n 1 </dev/null
 echo $?
 ## STDOUT:
@@ -93,7 +92,6 @@ argv.py $x $REPLY
 ## N-I dash/zsh stdout: []
 
 #### IFS= read -n (OSH regression: value saved in tempenv)
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 echo XYZ > "$TMP/readn.txt"
 IFS= TMOUT= read -n 1 char < "$TMP/readn.txt"
 argv.py "$char"
@@ -101,7 +99,6 @@ argv.py "$char"
 ## N-I dash/zsh stdout: ['']
 
 #### read -n doesn't strip whitespace (bug fix)
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 case $SH in dash|zsh) exit ;; esac
 
 echo '  a b  ' | (read -n 4; echo "[$REPLY]")
@@ -156,7 +153,6 @@ three vars
 ## END
 
 #### read -d -n - respects delimiter and splits
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 
 case $SH in dash|zsh|ash) exit ;; esac
 
@@ -216,7 +212,6 @@ three vars
 
 
 #### read -n with invalid arg
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 read -n not_a_number
 echo status=$?
 ## stdout: status=2
@@ -224,7 +219,6 @@ echo status=$?
 ## N-I zsh stdout-json: ""
 
 #### read -n from pipe
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 case $SH in dash|ash|zsh) exit ;; esac
 
 echo abcxyz | { read -n 3; echo reply=$REPLY; }
@@ -331,7 +325,6 @@ b
 ## N-I dash/ash/zsh stdout-json: ""
 
 #### read will unset extranous vars
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 
 echo 'a b' > $TMP/read-few.txt
 
@@ -403,7 +396,6 @@ argv.py "$escaped" "$raw"
 ## BUG dash/mksh/zsh stdout: ['', '']
 
 #### read -s from pipe, not a terminal
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 case $SH in dash|zsh) exit ;; esac
 
 # It's hard to really test this because it requires a terminal.  We hit a
@@ -522,7 +514,6 @@ argv.py "${arguments[@]}"
 ## N-I dash/mksh/zsh/ash stdout-json: ""
 
 #### read -d : (colon-separated records)
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 printf a,b,c:d,e,f:g,h,i | {
   IFS=,
   read -d : v1
@@ -623,7 +614,6 @@ reply=
 ## N-I dash/zsh/mksh stdout-json: ""
 
 #### read -t 0.5
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 case $SH in dash) exit ;; esac
 
 read -t 0.5 < /dev/null
@@ -638,7 +628,6 @@ echo $?
 ## N-I dash stdout-json: ""
 
 #### read -t -0.5 is invalid
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 # bash appears to just take the absolute value?
 
 read -t -0.5 < /dev/null
@@ -668,7 +657,6 @@ reply=hi
 ## N-I dash/mksh stdout-json: ""
 
 #### read -u syntax error
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 read -u -3
 echo status=$?
 ## STDOUT:
@@ -746,7 +734,6 @@ fooba
 ## N-I dash/zsh/ash stdout-json: ""
 
 #### read -p (not fully tested)
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 
 # hm DISABLED if we're not going to the terminal
 # so we're only testing that it accepts the flag here
@@ -763,7 +750,6 @@ h
 ## N-I dash/mksh/zsh stdout-json: ""
 
 #### read usage
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 read -n -1
 echo status=$?
 ## STDOUT:
@@ -824,7 +810,6 @@ status=1
 ## OK mksh stdout-json: ""
 
 #### read -n from directory
-## SKIP: Advanced read options (-N, -n, -d, -t, -u, -s, -e, -i, -a, -p, -P) not implemented
 
 case $SH in dash|ash) return ;; esac  # not implemented
 
