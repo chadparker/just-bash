@@ -1,5 +1,5 @@
 /**
- * Minimal AI agent for exploring the bash-env codebase
+ * Minimal AI agent for exploring the just-bash codebase
  *
  * This file contains only the agent logic - see shell.ts for the interactive loop.
  * Uses OverlayFs to provide read access to the real project files while
@@ -26,7 +26,7 @@ export interface CreateAgentOptions {
 }
 
 /**
- * Creates an agent runner that can chat about the bash-env codebase
+ * Creates an agent runner that can chat about the just-bash codebase
  *
  * Uses OverlayFs to provide direct read access to the real project files.
  * Any writes the agent makes stay in memory and don't affect the real filesystem.
@@ -39,7 +39,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRunner {
 
   const bashTool = createBashTool({
     fs: overlayFs,
-    extraInstructions: `You are exploring the bash-env project - a simulated bash environment in TypeScript.
+    extraInstructions: `You are exploring the just-bash project - a simulated bash environment in TypeScript.
 Use bash commands to explore:
 - ls src to see the source structure
 - cat README.md to read documentation

@@ -1,5 +1,5 @@
 /**
- * Interactive shell for the bash-env code explorer agent
+ * Interactive shell for the just-bash code explorer agent
  */
 
 import * as readline from "node:readline";
@@ -22,7 +22,7 @@ export function runShell(agent: AgentRunner): void {
   });
 
   console.log(`${colors.cyan}${colors.bold}╔══════════════════════════════════════════════════════════════╗
-║              bash-env Code Explorer Agent                     ║
+║              just-bash Code Explorer Agent                     ║
 ║         Ask questions about the codebase!                     ║
 ╚══════════════════════════════════════════════════════════════╝${colors.reset}
 `);

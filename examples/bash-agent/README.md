@@ -1,6 +1,6 @@
-# bash-env Code Explorer Agent
+# just-bash Code Explorer Agent
 
-An interactive AI agent that lets you chat about the bash-env codebase using natural language.
+An interactive AI agent that lets you chat about the just-bash codebase using natural language.
 
 ## Files
 
@@ -11,11 +11,13 @@ An interactive AI agent that lets you chat about the bash-env codebase using nat
 ## Setup
 
 1. Install dependencies:
+
    ```bash
    npm install
    ```
 
 2. Set your Anthropic API key:
+
    ```bash
    export ANTHROPIC_API_KEY=your-key-here
    ```
@@ -28,9 +30,10 @@ An interactive AI agent that lets you chat about the bash-env codebase using nat
 ## Usage
 
 Ask questions like:
+
 - "What commands are available?"
 - "How is the grep command implemented?"
-- "Show me the BashEnv class"
+- "Show me the Bash class"
 - "Find all test files"
 
 Type `exit` to quit.

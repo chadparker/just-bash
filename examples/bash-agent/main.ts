@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * bash-env Code Explorer Agent
+ * just-bash Code Explorer Agent
  *
  * Usage: npx tsx main.ts
  *

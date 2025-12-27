@@ -1,7 +1,7 @@
 {
   "name": "bash-agent-example",
   "version": "1.0.0",
-  "description": "Interactive AI agent for exploring the bash-env codebase",
+  "description": "Interactive AI agent for exploring the just-bash codebase",
   "type": "module",
   "scripts": {
     "start": "npx tsx main.ts",
