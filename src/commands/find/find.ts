@@ -87,7 +87,8 @@ export const findCommand: Command = {
         arg !== "(" &&
         arg !== ")" &&
         arg !== "\\(" &&
-        arg !== "\\)"
+        arg !== "\\)" &&
+        arg !== "!"
       ) {
         searchPath = arg;
       } else if (PREDICATES_WITH_ARGS_SET.has(arg)) {

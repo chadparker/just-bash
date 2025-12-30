@@ -52,11 +52,11 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRunner {
     fs: overlayFs,
     extraInstructions: `You are exploring the just-bash project - a simulated bash environment in TypeScript.
 Use bash commands to explore:
-- All files are in the project directory. Use cd to navigate to the project directory.
-- ls ./src to see the source structure
-- cat README.md to read documentation
-- grep -r "pattern" src to search code
-- find . -name "*.ts" to find files
+- All interesting files are in the ./project directory. 
+- ls ./project/src to see the source structure
+- cat ./project/README.md to read documentation
+- grep -r "pattern" ./project/src to search code
+- find ./project -name "*.ts" to find files
 
 Help the user understand the codebase, find code, and answer questions.
 

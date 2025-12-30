@@ -546,6 +546,27 @@ describe("find command", () => {
       expect(result.stdout).not.toContain("a.txt");
       expect(result.exitCode).toBe(0);
     });
+
+    it("should negate with ! shorthand", async () => {
+      const env = createEnv();
+      const result = await env.exec('find /project -type f ! -name "*.ts"');
+      expect(result.stdout).toContain("README.md");
+      expect(result.stdout).toContain("package.json");
+      expect(result.stdout).not.toContain("index.ts");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should negate with multiple ! shorthand", async () => {
+      const env = createEnv();
+      const result = await env.exec(
+        'find /project -type f ! -name "*.json" ! -name "*.md"',
+      );
+      expect(result.stdout).toContain("index.ts");
+      expect(result.stdout).toContain("helpers.ts");
+      expect(result.stdout).not.toContain("package.json");
+      expect(result.stdout).not.toContain("README.md");
+      expect(result.exitCode).toBe(0);
+    });
   });
 
   describe("unknown option handling", () => {
