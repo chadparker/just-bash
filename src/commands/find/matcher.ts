@@ -4,6 +4,85 @@ import { matchGlob } from "../../utils/glob.js";
 import type { EvalContext, EvalResult, Expression } from "./types.js";
 
 /**
+ * Analyze a path pattern to extract optimization hints.
+ * For patterns like "*\/pulls\/*.json", we can:
+ * 1. Know we need a directory named "pulls" somewhere in the path
+ * 2. Know the final file must match "*.json"
+ */
+export interface PathPatternHints {
+  /** Required directory name that must exist in path (e.g., "pulls" for "*\/pulls\/*") */
+  requiredDirName: string | null;
+  /** File extension filter (e.g., ".json" for "*.json") */
+  fileExtension: string | null;
+  /** Whether pattern requires file to be in a specific named directory */
+  mustBeInNamedDir: boolean;
+}
+
+/**
+ * Analyze a path pattern to extract optimization hints for directory pruning.
+ */
+export function analyzePathPattern(pattern: string): PathPatternHints {
+  const hints: PathPatternHints = {
+    requiredDirName: null,
+    fileExtension: null,
+    mustBeInNamedDir: false,
+  };
+
+  // Split pattern by path separator
+  const parts = pattern.split("/").filter((p) => p.length > 0);
+
+  // Look for literal directory names (not wildcards)
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    // Check if this is a literal name (no wildcards)
+    if (!part.includes("*") && !part.includes("?") && !part.includes("[")) {
+      hints.requiredDirName = part;
+      hints.mustBeInNamedDir = true;
+      break;
+    }
+  }
+
+  // Check file extension from last part
+  const lastPart = parts[parts.length - 1];
+  if (lastPart) {
+    // Check for patterns like "*.json" or "*.txt"
+    const extMatch = lastPart.match(/^\*(\.[a-zA-Z0-9]+)$/);
+    if (extMatch) {
+      hints.fileExtension = extMatch[1];
+    }
+  }
+
+  return hints;
+}
+
+/**
+ * Check if a directory path could possibly lead to matches for a path pattern.
+ * Returns false if we can definitively say no files in this subtree will match.
+ */
+export function canDirectoryMatchPath(
+  dirPath: string,
+  dirName: string,
+  hints: PathPatternHints,
+  hasRequiredDirInPath: boolean,
+): { shouldDescend: boolean; hasRequiredDir: boolean } {
+  // If no optimization hints available, always descend
+  if (!hints.requiredDirName) {
+    return { shouldDescend: true, hasRequiredDir: true };
+  }
+
+  // Check if this directory IS the required directory
+  const isRequiredDir = dirName === hints.requiredDirName;
+
+  // If we've already found the required dir in path, or this is it, descend
+  if (hasRequiredDirInPath || isRequiredDir) {
+    return { shouldDescend: true, hasRequiredDir: true };
+  }
+
+  // Otherwise, we still need to descend to look for the required directory
+  return { shouldDescend: true, hasRequiredDir: false };
+}
+
+/**
  * Evaluate a find expression and return both match result and prune flag.
  * The prune flag is set when -prune is evaluated and returns true.
  */
@@ -12,18 +91,86 @@ export function evaluateExpressionWithPrune(
   ctx: EvalContext,
 ): EvalResult {
   switch (expr.type) {
-    case "name":
+    case "name": {
+      // Fast path: check extension before full glob match for patterns like "*.json"
+      const pattern = expr.pattern;
+      const extMatch = pattern.match(/^\*(\.[a-zA-Z0-9]+)$/);
+      if (extMatch) {
+        const requiredExt = extMatch[1];
+        const name = ctx.name;
+        // Quick extension check - if extension doesn't match, skip glob
+        if (expr.ignoreCase) {
+          if (!name.toLowerCase().endsWith(requiredExt.toLowerCase())) {
+            return { matches: false, pruned: false, printed: false };
+          }
+        } else {
+          if (!name.endsWith(requiredExt)) {
+            return { matches: false, pruned: false, printed: false };
+          }
+        }
+        // For "*.ext" patterns, endsWith is sufficient if it passed
+        return { matches: true, pruned: false, printed: false };
+      }
       return {
-        matches: matchGlob(ctx.name, expr.pattern, expr.ignoreCase),
+        matches: matchGlob(ctx.name, pattern, expr.ignoreCase),
         pruned: false,
         printed: false,
       };
-    case "path":
+    }
+    case "path": {
+      // Fast paths for common patterns
+      const pattern = expr.pattern;
+      const path = ctx.relativePath;
+
+      // Fast path 1: Check for required directory segments (e.g., "*/pulls/*" requires "/pulls/")
+      // Look for literal path segments in the pattern
+      const segments = pattern.split("/");
+      for (let i = 0; i < segments.length - 1; i++) {
+        const seg = segments[i];
+        // If segment is literal (no wildcards) and not special (. or ..), path must contain this segment
+        if (
+          seg &&
+          seg !== "." &&
+          seg !== ".." &&
+          !seg.includes("*") &&
+          !seg.includes("?") &&
+          !seg.includes("[")
+        ) {
+          const requiredSegment = `/${seg}/`;
+          if (expr.ignoreCase) {
+            if (!path.toLowerCase().includes(requiredSegment.toLowerCase())) {
+              return { matches: false, pruned: false, printed: false };
+            }
+          } else {
+            if (!path.includes(requiredSegment)) {
+              return { matches: false, pruned: false, printed: false };
+            }
+          }
+        }
+      }
+
+      // Fast path 2: Check extension before full glob match for patterns like "*.json"
+      const extMatch = pattern.match(/\*(\.[a-zA-Z0-9]+)$/);
+      if (extMatch) {
+        const requiredExt = extMatch[1];
+        // Quick extension check - if extension doesn't match, skip glob
+        if (expr.ignoreCase) {
+          if (!path.toLowerCase().endsWith(requiredExt.toLowerCase())) {
+            return { matches: false, pruned: false, printed: false };
+          }
+        } else {
+          if (!path.endsWith(requiredExt)) {
+            return { matches: false, pruned: false, printed: false };
+          }
+        }
+      }
+
       return {
-        matches: matchGlob(ctx.relativePath, expr.pattern, expr.ignoreCase),
+        matches: matchGlob(path, pattern, expr.ignoreCase),
         pruned: false,
         printed: false,
       };
+    }
     case "regex": {
       try {
         const flags = expr.ignoreCase ? "i" : "";
@@ -182,6 +329,28 @@ export function expressionNeedsStatMetadata(expr: Expression | null): boolean {
         expressionNeedsStatMetadata(expr.left) ||
         expressionNeedsStatMetadata(expr.right)
       );
+  }
+}
+
+/**
+ * Check if an expression uses -empty (needs directory entry count)
+ */
+export function expressionNeedsEmptyCheck(expr: Expression | null): boolean {
+  if (!expr) return false;
+
+  switch (expr.type) {
+    case "empty":
+      return true;
+    case "not":
+      return expressionNeedsEmptyCheck(expr.expr);
+    case "and":
+    case "or":
+      return (
+        expressionNeedsEmptyCheck(expr.left) ||
+        expressionNeedsEmptyCheck(expr.right)
+      );
+    default:
+      return false;
   }
 }
 

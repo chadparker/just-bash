@@ -229,4 +229,65 @@ describe("find patterns", () => {
       expect(result.exitCode).toBe(0);
     });
   });
+
+  describe("-path with directory segments (fast path optimization)", () => {
+    it("should find files matching path pattern with specific directory", async () => {
+      const env = new Bash({
+        files: {
+          "/repos/project1/pulls/1.json": "{}",
+          "/repos/project1/pulls/2.json": "{}",
+          "/repos/project1/issues/1.json": "{}",
+          "/repos/project2/pulls/3.json": "{}",
+          "/repos/project2/other/4.json": "{}",
+        },
+      });
+      const result = await env.exec(
+        'find /repos -path "*/pulls/*.json" -type f',
+      );
+      expect(result.stdout).toBe(
+        "/repos/project1/pulls/1.json\n/repos/project1/pulls/2.json\n/repos/project2/pulls/3.json\n",
+      );
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should handle path pattern with multiple literal segments", async () => {
+      const env = new Bash({
+        files: {
+          "/a/src/lib/util.ts": "",
+          "/a/src/util.ts": "",
+          "/a/lib/util.ts": "",
+        },
+      });
+      const result = await env.exec('find /a -path "*/src/lib/*" -type f');
+      expect(result.stdout).toBe("/a/src/lib/util.ts\n");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should handle path pattern with extension filter", async () => {
+      const env = new Bash({
+        files: {
+          "/data/pulls/1.json": "{}",
+          "/data/pulls/2.txt": "",
+          "/data/pulls/readme.md": "",
+        },
+      });
+      const result = await env.exec('find /data -path "*/pulls/*.json"');
+      expect(result.stdout).toBe("/data/pulls/1.json\n");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should correctly handle path pattern starting with ./", async () => {
+      const env = new Bash({
+        files: {
+          "/project/src/index.ts": "",
+          "/project/src/utils.ts": "",
+          "/project/lib/index.ts": "",
+        },
+        cwd: "/project",
+      });
+      const result = await env.exec('find . -path "./src/*" -type f');
+      expect(result.stdout).toBe("./src/index.ts\n./src/utils.ts\n");
+      expect(result.exitCode).toBe(0);
+    });
+  });
 });

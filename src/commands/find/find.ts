@@ -1,6 +1,9 @@
 import type { DirentEntry } from "../../fs/interface.js";
 import type { Command, CommandContext, ExecResult } from "../../types.js";
-import { DEFAULT_BATCH_SIZE } from "../../utils/constants.js";
+
+// Use a larger batch size for find to maximize parallel I/O
+const FIND_BATCH_SIZE = 500;
+
 import { hasHelpFlag, showHelp } from "../help.js";
 import {
   applyWidth,
@@ -10,6 +13,7 @@ import {
 import {
   collectNewerRefs,
   evaluateExpressionWithPrune,
+  expressionNeedsEmptyCheck,
   expressionNeedsStatMetadata,
 } from "./matcher.js";
 import { parseExpressions } from "./parser.js";
@@ -186,6 +190,9 @@ export const findCommand: Command = {
     const needsStatMetadata =
       expressionNeedsStatMetadata(expr) || hasPrintfAction;
 
+    // Check if expression uses -empty (needs to read directories to count entries)
+    const needsEmptyCheck = expressionNeedsEmptyCheck(expr);
+
     // Check if readdirWithFileTypes is available (for optimization)
     const hasReaddirWithFileTypes =
       typeof ctx.fs.readdirWithFileTypes === "function";
@@ -279,30 +286,42 @@ export const findCommand: Command = {
         let entriesWithTypes: DirentEntry[] | null = null;
         let entries: string[] | null = null;
 
-        if (isDirectory) {
+        // Optimization: skip reading directory contents if we're at maxdepth
+        // Exception: if -empty is used, we need to read to check if directory is empty
+        const atMaxDepth = maxDepth !== null && depth >= maxDepth;
+        const shouldDescend = !atMaxDepth;
+        const shouldReadDir = shouldDescend || needsEmptyCheck;
+
+        if (isDirectory && shouldReadDir) {
           if (hasReaddirWithFileTypes && ctx.fs.readdirWithFileTypes) {
             entriesWithTypes = await ctx.fs.readdirWithFileTypes(currentPath);
-            children = entriesWithTypes.map((entry, idx) => ({
-              path:
-                currentPath === "/"
-                  ? `/${entry.name}`
-                  : `${currentPath}/${entry.name}`,
-              depth: depth + 1,
-              typeInfo: {
-                isFile: entry.isFile,
-                isDirectory: entry.isDirectory,
-              },
-              resultIndex: idx,
-            }));
             entries = entriesWithTypes.map((e) => e.name);
+            // Only create children if we should descend (not at maxdepth)
+            if (shouldDescend) {
+              children = entriesWithTypes.map((entry, idx) => ({
+                path:
+                  currentPath === "/"
+                    ? `/${entry.name}`
+                    : `${currentPath}/${entry.name}`,
+                depth: depth + 1,
+                typeInfo: {
+                  isFile: entry.isFile,
+                  isDirectory: entry.isDirectory,
+                },
+                resultIndex: idx,
+              }));
+            }
           } else {
             entries = await ctx.fs.readdir(currentPath);
-            children = entries.map((entry, idx) => ({
-              path:
-                currentPath === "/" ? `/${entry}` : `${currentPath}/${entry}`,
-              depth: depth + 1,
-              resultIndex: idx,
-            }));
+            // Only create children if we should descend (not at maxdepth)
+            if (shouldDescend) {
+              children = entries.map((entry, idx) => ({
+                path:
+                  currentPath === "/" ? `/${entry}` : `${currentPath}/${entry}`,
+                depth: depth + 1,
+                resultIndex: idx,
+              }));
+            }
           }
         }
 
@@ -435,7 +454,7 @@ export const findCommand: Command = {
 
           // BFS to discover all nodes with parallel processing
           while (workQueue.length > 0) {
-            const batch = workQueue.splice(0, DEFAULT_BATCH_SIZE);
+            const batch = workQueue.splice(0, FIND_BATCH_SIZE);
             const nodes = await Promise.all(
               batch.map((q) => processNode(q.item)),
             );
@@ -512,47 +531,85 @@ export const findCommand: Command = {
             finalResult.printfData.push(...rootResult.printfData);
           }
         } else {
-          // Pre-order traversal: parent before children
-          // Use recursive approach with parallel batching (already optimal)
+          // Pre-order traversal using BFS with batched processing
+          // This maximizes parallelism while maintaining pre-order output
 
-          async function findRecursivePreOrder(
-            item: WorkItem,
-          ): Promise<NodeResult> {
-            const result: NodeResult = { paths: [], printfData: [] };
-            const node = await processNode(item);
-            if (!node) return result;
-
-            // Add this node first (pre-order)
-            const { print, printfData } = shouldPrintNode(node);
-            if (print) {
-              result.paths.push(node.relativePath);
-              if (printfData) {
-                result.printfData.push(printfData);
-              }
-            }
-
-            // Then process children in parallel batches
-            for (let i = 0; i < node.children.length; i += DEFAULT_BATCH_SIZE) {
-              const batch = node.children.slice(i, i + DEFAULT_BATCH_SIZE);
-              const childResults = await Promise.all(
-                batch.map(findRecursivePreOrder),
-              );
-              for (const childResult of childResults) {
-                result.paths.push(...childResult.paths);
-                result.printfData.push(...childResult.printfData);
-              }
-            }
-
-            return result;
+          interface NodeWithOrder {
+            node: ProcessedNode;
+            orderIndex: number;
           }
 
-          const rootResult = await findRecursivePreOrder({
-            path: basePath,
-            depth: 0,
-            resultIndex: 0,
-          });
-          finalResult.paths.push(...rootResult.paths);
-          finalResult.printfData.push(...rootResult.printfData);
+          const nodeResults: Map<
+            number,
+            { path: string; printfData: FindResult | null }
+          > = new Map();
+          let orderCounter = 0;
+
+          // BFS queue with order tracking
+          const workQueue: Array<{ item: WorkItem; orderIndex: number }> = [
+            {
+              item: { path: basePath, depth: 0, resultIndex: 0 },
+              orderIndex: orderCounter++,
+            },
+          ];
+
+          // Track child order indices for each parent
+          const childOrders: Map<number, number[]> = new Map();
+
+          while (workQueue.length > 0) {
+            // Process all items in the queue in parallel batches
+            const batch = workQueue.splice(0, FIND_BATCH_SIZE);
+            const processed: Array<NodeWithOrder | null> = await Promise.all(
+              batch.map(async ({ item, orderIndex }) => {
+                const node = await processNode(item);
+                return node ? { node, orderIndex } : null;
+              }),
+            );
+
+            for (const result of processed) {
+              if (!result) continue;
+              const { node, orderIndex } = result;
+
+              // Check if this node should be printed
+              const { print, printfData } = shouldPrintNode(node);
+              if (print) {
+                nodeResults.set(orderIndex, {
+                  path: node.relativePath,
+                  printfData,
+                });
+              }
+
+              // Add children to work queue with consecutive order indices
+              if (node.children.length > 0) {
+                const childIndices: number[] = [];
+                for (const child of node.children) {
+                  const childOrder = orderCounter++;
+                  childIndices.push(childOrder);
+                  workQueue.push({ item: child, orderIndex: childOrder });
+                }
+                childOrders.set(orderIndex, childIndices);
+              }
+            }
+          }
+
+          // Build result in pre-order by walking the tree structure
+          function collectPreOrder(orderIndex: number): void {
+            const nodeResult = nodeResults.get(orderIndex);
+            if (nodeResult) {
+              finalResult.paths.push(nodeResult.path);
+              if (nodeResult.printfData) {
+                finalResult.printfData.push(nodeResult.printfData);
+              }
+            }
+            const children = childOrders.get(orderIndex);
+            if (children) {
+              for (const childIndex of children) {
+                collectPreOrder(childIndex);
+              }
+            }
+          }
+
+          collectPreOrder(0);
         }
 
         return finalResult;
