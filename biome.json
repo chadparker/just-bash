@@ -38,6 +38,7 @@
       "!examples",
       "!**/*.parsed.json",
       "!.claude",
+      "!.pnpm-store",
       "!src/commands/python3/worker.js"
     ]
   }
