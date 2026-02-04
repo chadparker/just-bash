@@ -65,14 +65,17 @@ let AsyncLocalStorageClass: (new <T>() => AsyncLocalStorageType<T>) | null =
 // Only load AsyncLocalStorage in Node.js (not in browser builds)
 if (!IS_BROWSER) {
   try {
-    // Use dynamic require to avoid static analysis by bundlers
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // Use createRequire for ESM compatibility (require is not defined in ESM)
+    // This approach works in both CJS and ESM Node.js environments
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
     const asyncHooks = require("node:async_hooks");
     AsyncLocalStorageClass = asyncHooks.AsyncLocalStorage;
-  } catch {
+  } catch (e) {
     // AsyncLocalStorage not available (e.g., in some edge runtimes)
     console.debug(
-      "[DefenseInDepthBox] AsyncLocalStorage not available, defense-in-depth disabled",
+      "[DefenseInDepthBox] AsyncLocalStorage not available, defense-in-depth disabled:",
+      e instanceof Error ? e.message : e,
     );
   }
 }
