@@ -1,10 +1,17 @@
 /**
  * Worker thread for Python execution via Pyodide.
  * Keeps Pyodide loaded and handles multiple execution requests.
+ *
+ * Defense-in-depth activates AFTER Pyodide loads (WASM init needs unrestricted JS).
+ * User Python code runs with dangerous globals blocked.
  */
 
 import { parentPort, workerData } from "node:worker_threads";
 import { loadPyodide, type PyodideInterface } from "pyodide";
+import {
+  WorkerDefenseInDepth,
+  type WorkerDefenseStats,
+} from "../../security/index.js";
 import { SyncFsBackend } from "./sync-fs-backend.js";
 
 export interface WorkerInput {
@@ -19,6 +26,8 @@ export interface WorkerInput {
 export interface WorkerOutput {
   success: boolean;
   error?: string;
+  /** Defense-in-depth stats if enabled */
+  defenseStats?: WorkerDefenseStats;
 }
 
 let pyodideInstance: PyodideInterface | null = null;
@@ -1155,20 +1164,77 @@ except SystemExit as e:
   }
 }
 
+// Defense-in-depth instance - activated AFTER Pyodide loads
+let defense: WorkerDefenseInDepth | null = null;
+
+/**
+ * Initialize Pyodide and then activate defense-in-depth.
+ * This phased approach allows Pyodide to load without restrictions,
+ * then blocks dangerous globals before user code runs.
+ */
+async function initializeWithDefense(): Promise<void> {
+  // Load Pyodide first (needs unrestricted JS features for WASM init)
+  await getPyodide();
+
+  // Activate defense after Pyodide is loaded.
+  //
+  // Security exclusions required for Pyodide operation:
+  //
+  // 1. proxy: Pyodide's Python-JS interop (pyodide.ffi) wraps JavaScript objects
+  //    in Proxy to make them accessible from Python. Without this, basic operations
+  //    like accessing JS object properties from Python would fail.
+  //    Security impact: Proxy alone cannot execute arbitrary code strings. An attacker
+  //    would need access to Function/eval (which remain blocked) to achieve code execution.
+  //    See: https://pyodide.org/en/stable/usage/type-conversions.html
+  //
+  // 2. setImmediate: Pyodide's webloop (asyncio implementation) uses setImmediate
+  //    for scheduling microtasks and async task execution. Without this, any Python
+  //    code using async/await would hang indefinitely.
+  //    Security impact: setImmediate only accepts function callbacks, not code strings,
+  //    so it cannot be used for arbitrary code execution like setTimeout("code") could.
+  //    See: https://pyodide.org/en/stable/usage/webloop.html
+  //
+  defense = new WorkerDefenseInDepth({
+    excludeViolationTypes: ["proxy", "setImmediate"],
+    onViolation: (v) => {
+      parentPort?.postMessage({ type: "security-violation", violation: v });
+    },
+  });
+}
+
 // Handle messages from parent
 if (parentPort) {
   if (workerData) {
-    runPython(workerData as WorkerInput).then((result) => {
-      parentPort?.postMessage(result);
-    });
+    initializeWithDefense()
+      .then(() => runPython(workerData as WorkerInput))
+      .then((result) => {
+        result.defenseStats = defense?.getStats();
+        parentPort?.postMessage(result);
+      })
+      .catch((e) => {
+        parentPort?.postMessage({
+          success: false,
+          error: (e as Error).message,
+          defenseStats: defense?.getStats(),
+        });
+      });
   }
 
   parentPort.on("message", async (input: WorkerInput) => {
     try {
+      // Defense should already be active from initial load
+      if (!defense) {
+        await initializeWithDefense();
+      }
       const result = await runPython(input);
+      result.defenseStats = defense?.getStats();
       parentPort?.postMessage(result);
     } catch (e) {
-      parentPort?.postMessage({ success: false, error: (e as Error).message });
+      parentPort?.postMessage({
+        success: false,
+        error: (e as Error).message,
+        defenseStats: defense?.getStats(),
+      });
     }
   });
 }

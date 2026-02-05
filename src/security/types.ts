@@ -14,9 +14,9 @@
  */
 export interface DefenseInDepthConfig {
   /**
-   * Enable or disable the defense layer (default: true when option is provided).
+   * Enable or disable the defense layer. Default: true
    */
-  enabled: boolean;
+  enabled?: boolean;
 
   /**
    * Audit mode: log violations but don't block them.
@@ -30,6 +30,13 @@ export interface DefenseInDepthConfig {
    * Called regardless of auditMode setting.
    */
   onViolation?: (violation: SecurityViolation) => void;
+
+  /**
+   * Violation types to exclude from blocking.
+   * Use this when certain globals are required for legitimate purposes
+   * (e.g., WebAssembly for sql.js in sqlite3 worker).
+   */
+  excludeViolationTypes?: SecurityViolationType[];
 }
 
 /**
