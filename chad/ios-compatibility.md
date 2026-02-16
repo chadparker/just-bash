@@ -2,6 +2,14 @@
 
 Running just-bash on iOS via WKWebView or JavaScriptCore.
 
+## Existing Browser Support
+
+A browser bundle already exists (`8a35592`):
+- Entry point: `src/browser.ts` → `dist/bundle/browser.js`
+- Import via: `just-bash/browser`
+- Build: `esbuild --platform=browser --external:node:*`
+- Exports `InMemoryFs` instead of node-dependent filesystems
+
 ## Will Work
 
 - **Parser** (`src/parser/`) - Pure JS, no Node deps
@@ -16,15 +24,18 @@ Running just-bash on iOS via WKWebView or JavaScriptCore.
 
 | File | Issue | Fix |
 |------|-------|-----|
-| `src/interpreter/expansion/variable.ts:77` | `process.pid` for `$$` | Inject via config or return fixed value (e.g., 1) |
-| `src/commands/base64/base64.ts:49,52` | `Buffer.from(..., 'base64')` | Use `btoa()`/`atob()` with UTF-8 handling |
-| `src/commands/curl/curl.ts:78` | `Buffer.from()` for Basic auth | Use `btoa()` |
+| `src/interpreter/expansion/variable.ts:127` | `process.pid` for `$$` | Inject via config or return fixed value (e.g., 1) |
+| `src/commands/curl/curl.ts:82` | `Buffer.from()` for Basic auth | Use `btoa()` |
+
+**Already fixed:**
+- `src/commands/base64/base64.ts` - now uses `atob()`/`btoa()`
 
 ## Won't Work (Exclude from bundle)
 
 - `src/overlay-fs/` - Uses `node:fs`, `node:path`
 - `src/cli/` - Node-specific (readline, process.argv)
 - `src/sandbox/` - Uses Node child_process concepts
+- `gzip`, `gunzip`, `zcat` - Use `node:zlib` (noted in browser.ts)
 
 ## Needs Verification
 
@@ -64,12 +75,10 @@ Full browser environment with DOM.
 - Communication overhead (JS ↔ Swift via message handlers)
 
 **Steps:**
-1. Create browser-targeted esbuild config (`platform: 'browser'`)
-2. Replace `Buffer.from()` calls with `btoa()`/`atob()` wrappers
-3. Make `process.pid` configurable or return constant
-4. Exclude: overlay-fs, cli, sandbox from bundle
-5. Expose API via `window.JustBash` or ES module
-6. Test in Safari/iOS simulator
+1. Use existing browser bundle (`just-bash/browser`)
+2. Fix `curl` auth to use `btoa()` instead of `Buffer.from()`
+3. Fix `process.pid` - make configurable or return constant
+4. Test in Safari/iOS simulator
 
 ### Path B: JavaScriptCore (No WebView)
 
@@ -88,7 +97,7 @@ Pure JS engine, no DOM.
 - Harder to debug
 
 **Steps:**
-1. Same as Path A steps 1-4
+1. Same as Path A steps 1-3
 2. Remove or stub `turndown` dependency (curl returns raw HTML)
 3. Verify/add `TextEncoder`/`TextDecoder` polyfills
 4. Create Swift bridge for `fetch` if network commands needed
@@ -105,9 +114,9 @@ Start with **Path A (WKWebView)** for faster iteration:
 ## API Surface for iOS
 
 ```typescript
-import { Bash, VirtualFs } from 'just-bash';
+import { Bash, InMemoryFs } from 'just-bash/browser';
 
-const fs = new VirtualFs({
+const fs = new InMemoryFs({
   '/home/user/data.txt': 'file contents',
   '/home/user/script.sh': '#!/bin/bash\necho hello',
 });
@@ -116,6 +125,32 @@ const bash = new Bash({ fs });
 
 const result = await bash.exec('cat /home/user/data.txt');
 // { stdout: 'file contents\n', stderr: '', exitCode: 0 }
+```
+
+## Relevant Upstream PRs
+
+Upstream: `vercel-labs/just-bash`
+
+| PR | Title | iOS Relevance |
+|----|-------|---------------|
+| [#67](https://github.com/vercel-labs/just-bash/pull/67) | LazyFs for lazy in-memory files | Load files on-demand via Swift callbacks; addresses memory constraints |
+| [#66](https://github.com/vercel-labs/just-bash/pull/66) | Make Bash serializable | Persist state between app launches |
+| [#42](https://github.com/vercel-labs/just-bash/pull/42) | Custom backing store for in-memory-fs | Could allow iOS-native storage backend |
+
+**#67 LazyFs** is particularly interesting - provides callbacks for `listDir` and `loadFile` that could bridge to Swift:
+
+```typescript
+const lazyFs = new LazyFs({
+  listDir: async (dirPath) => {
+    // Bridge to Swift to list directory
+    return await swift.listDirectory(dirPath);
+  },
+  loadFile: async (filePath) => {
+    // Bridge to Swift to read file
+    return { content: await swift.readFile(filePath) };
+  },
+  allowWrites: true, // writes stay in memory
+});
 ```
 
 ## Open Questions
