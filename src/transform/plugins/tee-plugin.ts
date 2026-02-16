@@ -1,7 +1,6 @@
 import type {
   CommandNode,
   PipelineNode,
-  RedirectionNode,
   ScriptNode,
   SimpleCommandNode,
   StatementNode,
@@ -26,7 +25,6 @@ export interface TeeFileInfo {
   /** The full command string (name + arguments) before tee wrapping */
   command: string;
   stdoutFile: string;
-  stderrFile: string;
 }
 
 export interface TeePluginMetadata {
@@ -36,6 +34,7 @@ export interface TeePluginMetadata {
 export class TeePlugin implements TransformPlugin<TeePluginMetadata> {
   readonly name = "tee";
   private options: TeePluginOptions;
+  private counter = 0;
 
   constructor(options: TeePluginOptions) {
     this.options = options;
@@ -43,9 +42,8 @@ export class TeePlugin implements TransformPlugin<TeePluginMetadata> {
 
   transform(context: TransformContext): TransformResult<TeePluginMetadata> {
     const teeFiles: TeeFileInfo[] = [];
-    const counter = { value: 0 };
     const timestamp = this.options.timestamp ?? new Date();
-    const ast = this.transformScript(context.ast, teeFiles, counter, timestamp);
+    const ast = this.transformScript(context.ast, teeFiles, timestamp);
     return { ast, metadata: { teeFiles } };
   }
 
@@ -53,30 +51,26 @@ export class TeePlugin implements TransformPlugin<TeePluginMetadata> {
     return date.toISOString().replace(/:/g, "-");
   }
 
-  private generateFilenames(
+  private generateStdoutPath(
     index: number,
     commandName: string,
     timestamp: Date,
-  ): { stdoutFile: string; stderrFile: string } {
+  ): string {
     const ts = this.formatTimestamp(timestamp);
     const idx = String(index).padStart(3, "0");
     const dir = this.options.outputDir;
-    return {
-      stdoutFile: `${dir}/${ts}-${idx}-${commandName}.stdout.txt`,
-      stderrFile: `${dir}/${ts}-${idx}-${commandName}.stderr.txt`,
-    };
+    return `${dir}/${ts}-${idx}-${commandName}.stdout.txt`;
   }
 
   private transformScript(
     node: ScriptNode,
     teeFiles: TeeFileInfo[],
-    counter: { value: number },
     timestamp: Date,
   ): ScriptNode {
     return {
       ...node,
       statements: node.statements.map((s) =>
-        this.transformStatement(s, teeFiles, counter, timestamp),
+        this.transformStatement(s, teeFiles, timestamp),
       ),
     };
   }
@@ -84,60 +78,87 @@ export class TeePlugin implements TransformPlugin<TeePluginMetadata> {
   private transformStatement(
     node: StatementNode,
     teeFiles: TeeFileInfo[],
-    counter: { value: number },
     timestamp: Date,
   ): StatementNode {
+    const newPipelines: PipelineNode[] = [];
+    const newOperators: ("&&" | "||" | ";")[] = [];
+
+    for (let i = 0; i < node.pipelines.length; i++) {
+      const pipeline = node.pipelines[i];
+
+      // Preserve original operator connecting this pipeline
+      if (i > 0) {
+        newOperators.push(node.operators[i - 1]);
+      }
+
+      const result = this.transformPipeline(pipeline, teeFiles, timestamp);
+      newPipelines.push(result.pipeline);
+
+      if (result.origCmdNewIndices !== null) {
+        const indices = result.origCmdNewIndices;
+        // Save original PIPESTATUS entries into temp vars
+        newOperators.push(";");
+        newPipelines.push(this.makePipestatusSave(indices));
+        // Restore PIPESTATUS and exit code with dummy pipeline.
+        // Apply the original pipeline's negation here (not on the
+        // wrapped pipeline) so ! inverts the restored exit code.
+        newOperators.push(";");
+        newPipelines.push(
+          this.makePipestatusRestore(indices.length, result.negated),
+        );
+      }
+    }
+
     return {
       ...node,
-      pipelines: node.pipelines.map((p) =>
-        this.transformPipeline(p, teeFiles, counter, timestamp),
-      ),
+      pipelines: newPipelines,
+      operators: newOperators,
     };
   }
 
   private transformPipeline(
     node: PipelineNode,
     teeFiles: TeeFileInfo[],
-    counter: { value: number },
     timestamp: Date,
-  ): PipelineNode {
+  ): {
+    pipeline: PipelineNode;
+    origCmdNewIndices: number[] | null;
+    negated: boolean;
+  } {
+    // Only wrap commands in existing pipelines (2+ commands).
+    // Standalone commands are never wrapped — this avoids breaking
+    // state-modifying builtins (read, cd, export, eval, etc.) that
+    // lose their side effects when moved into a subshell pipeline.
+    if (node.commands.length <= 1) {
+      return { pipeline: node, origCmdNewIndices: null, negated: false };
+    }
+
     const newCommands: CommandNode[] = [];
     const newPipeStderr: boolean[] = [];
+    const origCmdNewIndices: number[] = [];
+    let anyWrapped = false;
 
     for (let i = 0; i < node.commands.length; i++) {
       const cmd = node.commands[i];
-      if (cmd.type !== "SimpleCommand" || !this.shouldTarget(cmd)) {
+      const isLast = i === node.commands.length - 1;
+
+      // Skip non-SimpleCommand, assignment-only, and non-targeted commands
+      if (
+        cmd.type !== "SimpleCommand" ||
+        !cmd.name ||
+        !this.shouldTarget(cmd)
+      ) {
+        origCmdNewIndices.push(newCommands.length);
         newCommands.push(cmd);
-        if (i < node.commands.length - 1) {
+        if (!isLast) {
           newPipeStderr.push(node.pipeStderr?.[i] ?? false);
         }
         continue;
       }
 
       const commandName = this.getCommandName(cmd.name) ?? "unknown";
-      const idx = counter.value++;
-      const { stdoutFile, stderrFile } = this.generateFilenames(
-        idx,
-        commandName,
-        timestamp,
-      );
-
-      // Add stderr redirection to the command
-      const stderrRedir: RedirectionNode = {
-        type: "Redirection",
-        fd: 2,
-        operator: ">",
-        target: {
-          type: "Word",
-          parts: [{ type: "Literal", value: stderrFile }],
-        },
-      };
-      const modifiedCmd: SimpleCommandNode = {
-        ...cmd,
-        redirections: [...cmd.redirections, stderrRedir],
-      };
-
-      // Create tee command for stdout
+      const idx = this.counter++;
+      const stdoutFile = this.generateStdoutPath(idx, commandName, timestamp);
       const teeCmd = this.makeTeeCommand(stdoutFile);
 
       const command = this.serializeCommand(cmd);
@@ -146,23 +167,131 @@ export class TeePlugin implements TransformPlugin<TeePluginMetadata> {
         commandName,
         command,
         stdoutFile,
-        stderrFile,
       });
 
-      newCommands.push(modifiedCmd);
-      // Pipe from modified command to tee (not stderr)
-      newPipeStderr.push(false);
+      origCmdNewIndices.push(newCommands.length);
+      newCommands.push(cmd);
+      // cmd→tee: use original outgoing pipe type (preserves |& so tee
+      // captures stderr too when the original pipe was |&)
+      newPipeStderr.push(node.pipeStderr?.[i] ?? false);
       newCommands.push(teeCmd);
-      // If not the last original command, add pipe from tee to next command
-      if (i < node.commands.length - 1) {
-        newPipeStderr.push(node.pipeStderr?.[i] ?? false);
+      if (!isLast) {
+        // tee→next: always regular pipe (tee produces no stderr)
+        newPipeStderr.push(false);
       }
+      anyWrapped = true;
+    }
+
+    if (!anyWrapped) {
+      return { pipeline: node, origCmdNewIndices: null, negated: false };
     }
 
     return {
-      ...node,
-      commands: newCommands,
-      pipeStderr: newPipeStderr.length > 0 ? newPipeStderr : undefined,
+      pipeline: {
+        ...node,
+        negated: false, // strip negation; applied to restore pipeline instead
+        commands: newCommands,
+        pipeStderr: newPipeStderr.length > 0 ? newPipeStderr : undefined,
+      },
+      origCmdNewIndices,
+      negated: node.negated,
+    };
+  }
+
+  /**
+   * Save PIPESTATUS entries for original commands into temp vars.
+   * Produces: `__tps0=${PIPESTATUS[idx0]} __tps1=${PIPESTATUS[idx1]} ...`
+   *
+   * All expansions happen before any assignment (single simple command),
+   * so all read from the same PIPESTATUS snapshot.
+   */
+  private makePipestatusSave(origCmdNewIndices: number[]): PipelineNode {
+    return {
+      type: "Pipeline",
+      commands: [
+        {
+          type: "SimpleCommand",
+          assignments: origCmdNewIndices.map((newIdx, i) => ({
+            type: "Assignment" as const,
+            name: `__tps${i}`,
+            value: {
+              type: "Word" as const,
+              parts: [
+                {
+                  type: "ParameterExpansion" as const,
+                  parameter: `PIPESTATUS[${newIdx}]`,
+                  operation: null,
+                },
+              ],
+            },
+            append: false,
+            array: null,
+          })),
+          name: null,
+          args: [],
+          redirections: [],
+        },
+      ],
+      negated: false,
+    };
+  }
+
+  /**
+   * Restore PIPESTATUS and exit code with a dummy pipeline.
+   * Produces: `(exit $__tps0) | (exit $__tps1) | ...`
+   *
+   * This sets PIPESTATUS to the original commands' exit codes and
+   * sets $? to the last original command's exit code.
+   */
+  private makePipestatusRestore(count: number, negated: boolean): PipelineNode {
+    const commands: CommandNode[] = [];
+    for (let i = 0; i < count; i++) {
+      commands.push({
+        type: "Subshell",
+        body: [
+          {
+            type: "Statement",
+            pipelines: [
+              {
+                type: "Pipeline",
+                commands: [
+                  {
+                    type: "SimpleCommand",
+                    assignments: [],
+                    name: {
+                      type: "Word",
+                      parts: [{ type: "Literal", value: "exit" }],
+                    },
+                    args: [
+                      {
+                        type: "Word",
+                        parts: [
+                          {
+                            type: "ParameterExpansion",
+                            parameter: `__tps${i}`,
+                            operation: null,
+                          },
+                        ],
+                      },
+                    ],
+                    redirections: [],
+                  },
+                ],
+                negated: false,
+              },
+            ],
+            operators: [],
+            background: false,
+          },
+        ],
+        redirections: [],
+      });
+    }
+
+    return {
+      type: "Pipeline",
+      commands,
+      negated,
     };
   }
 

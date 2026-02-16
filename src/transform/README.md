@@ -65,7 +65,7 @@ bash.registerTransformPlugin(new CommandCollectorPlugin());
 
 // exec() applies transforms automatically and returns metadata
 const result = await bash.exec("echo hello | grep hello");
-result.metadata?.commands; // ["echo", "grep", "tee"]
+result.metadata?.commands; // ["echo", "exit", "grep", "tee"]
 
 // transform() is also available for transform-only (no execution)
 const transformed = bash.transform("echo hello | grep hello");
@@ -141,15 +141,17 @@ The full set of AST types is defined in `src/ast/types.ts`.
 
 ### `TeePlugin`
 
-Wraps commands with `tee` for stdout capture and `2>` for stderr capture. Generates per-command output files in a directory.
+Captures stdout from each command in a pipeline by inserting `tee` commands. Only wraps commands that are already in pipelines (2+ commands) — standalone commands are never modified.
+
+The transformed script is valid standard bash and can be executed by `/bin/bash`, `child_process.exec`, Docker, SSH, or any other runtime.
 
 ```typescript
 import { TeePlugin } from "just-bash";
 
-// Wrap all commands (including single-command pipelines)
+// Capture stdout from all pipeline commands
 new TeePlugin({ outputDir: "/tmp/logs" });
 
-// Only wrap specific commands
+// Only capture specific commands
 new TeePlugin({
   outputDir: "/tmp/logs",
   targetCommandPattern: /^grep$/,
@@ -170,7 +172,7 @@ new TeePlugin({
 | `targetCommandPattern` | `{ test(input: string): boolean }`| Filter which commands to wrap (default: all)   |
 | `timestamp`            | `Date`                            | Fixed timestamp (default: `new Date()`)        |
 
-**Filename format:** `{isoTimestamp}-{3-digit-index}-{commandName}.stdout.txt` / `.stderr.txt`
+**Filename format:** `{isoTimestamp}-{3-digit-index}-{commandName}.stdout.txt`
 
 Colons in ISO timestamps are replaced with `-` for filesystem safety: `2024-01-15T10-30-45.123Z`
 
@@ -182,19 +184,44 @@ interface TeeFileInfo {
   commandName: string;    // e.g. "echo", "grep", "unknown"
   command: string;        // Full command with arguments, e.g. "grep -r pattern src/"
   stdoutFile: string;     // Full path to stdout capture file
-  stderrFile: string;     // Full path to stderr capture file
 }
 ```
 
-**Examples:**
+**Semantics preservation:** The plugin is designed to produce zero observable differences compared to the original script:
+
+- **Standalone commands** (`echo hello`, `cd /tmp`, `read x`, `VAR=val`) are never wrapped. Only commands already in pipelines are modified, since they already run in subshell-like contexts.
+- **Exit codes** are restored via PIPESTATUS save+restore. After the wrapped pipeline, a dummy pipeline `(exit $saved0) | (exit $saved1)` reconstructs the original PIPESTATUS array and sets `$?` to the correct value.
+- **`|&` pipes** are preserved. The original pipe type is used for `cmd |& tee` (so tee captures stderr too), and a regular pipe is used for `tee | next_cmd`.
+- **`&&` / `||` chains** work correctly because PIPESTATUS restoration feeds the correct exit code into the chain operator.
+- **stderr** flows through normally — no stderr redirections are added.
+
+**Transform examples:**
 
 ```
 echo hello
-  --> echo hello 2> /tmp/logs/...-000-echo.stderr.txt | tee /tmp/logs/...-000-echo.stdout.txt
+  --> echo hello                    (standalone: not wrapped)
 
 echo hello | grep foo
-  --> echo hello 2> /tmp/logs/...-000-echo.stderr.txt | tee /tmp/logs/...-000-echo.stdout.txt | grep foo 2> /tmp/logs/...-001-grep.stderr.txt | tee /tmp/logs/...-001-grep.stdout.txt
+  --> echo hello | tee /tmp/logs/...-000-echo.stdout.txt
+      | grep foo | tee /tmp/logs/...-001-grep.stdout.txt
+      ; __tps0=${PIPESTATUS[0]} __tps1=${PIPESTATUS[2]}
+      ; (exit $__tps0) | (exit $__tps1)
+
+cd /tmp; VAR=hello
+  --> cd /tmp; VAR=hello            (standalone: not wrapped)
+
+echo hello | grep foo && echo found
+  --> echo hello | tee ... | grep foo | tee ...
+      ; __tps0=... __tps1=...
+      ; (exit $__tps0) | (exit $__tps1)
+      && echo found                 (standalone: not wrapped)
 ```
+
+**Known limitation: `shopt -s lastpipe`**
+
+When `lastpipe` is enabled, bash runs the last command of a pipeline in the current shell (not a subshell). The tee plugin inserts `tee` after the last command, making the original last command no longer last. This changes its execution context from current-shell to subshell.
+
+This is not fixable at AST transform time because `lastpipe` is a runtime `shopt` setting not visible in the AST. `lastpipe` is off by default and rarely used.
 
 ### `CommandCollectorPlugin`
 
@@ -239,6 +266,6 @@ src/transform/
   serialize.test.ts              -- round-trip tests
   transform.test.ts              -- plugin + pipeline + integration tests
   plugins/
-    tee-plugin.ts                -- Per-command tee/stderr wrapping
+    tee-plugin.ts                -- Per-command stdout capture via tee
     command-collector.ts         -- Command name extraction
 ```

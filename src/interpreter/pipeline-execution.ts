@@ -33,6 +33,7 @@ export async function executePipeline(
   let lastResult: ExecResult = OK;
   let pipefailExitCode = 0; // Track rightmost failing command
   const pipestatusExitCodes: number[] = []; // Track all exit codes for PIPESTATUS
+  let accumulatedStderr = ""; // Accumulate stderr from all pipeline commands
 
   // For multi-command pipelines, save parent's $_ because pipeline commands
   // run in subshell-like contexts and should not affect parent's $_
@@ -127,23 +128,29 @@ export async function executePipeline(
       if (pipeStderrToNext) {
         // |& pipes both stdout and stderr to next command's stdin
         stdin = result.stderr + result.stdout;
-        lastResult = {
-          stdout: "",
-          stderr: "",
-          exitCode: result.exitCode,
-        };
       } else {
-        // Regular | only pipes stdout
+        // Regular | only pipes stdout; stderr goes to the parent
         stdin = result.stdout;
-        lastResult = {
-          stdout: "",
-          stderr: result.stderr,
-          exitCode: result.exitCode,
-        };
+        accumulatedStderr += result.stderr;
       }
+      lastResult = {
+        stdout: "",
+        stderr: "",
+        exitCode: result.exitCode,
+      };
     } else {
       lastResult = result;
     }
+  }
+
+  // Merge stderr from all non-last pipeline commands into the final result.
+  // In bash, stderr from each pipeline command goes to the terminal (parent),
+  // not through the pipe. Only stdout flows through pipes.
+  if (accumulatedStderr) {
+    lastResult = {
+      ...lastResult,
+      stderr: accumulatedStderr + lastResult.stderr,
+    };
   }
 
   // Set PIPESTATUS array with exit codes from all pipeline commands
