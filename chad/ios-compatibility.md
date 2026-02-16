@@ -10,6 +10,32 @@ A browser bundle already exists (`8a35592`):
 - Build: `esbuild --platform=browser --external:node:*`
 - Exports `InMemoryFs` instead of node-dependent filesystems
 
+## Lazy File Loading (Built-in)
+
+As of `c7a4da4` (#115), `InMemoryFs` supports lazy file providers - functions that load content on first access:
+
+```typescript
+import { Bash, InMemoryFs } from 'just-bash/browser';
+
+const fs = new InMemoryFs({
+  // Immediate content
+  '/config.txt': 'small config',
+
+  // Lazy - only loaded when file is read
+  '/data/large.json': () => swift.readFileFromBundle('large.json'),
+  '/data/image.png': async () => await swift.fetchAsset('image.png'),
+});
+
+const bash = new Bash({ fs });
+await bash.exec('cat /data/large.json'); // NOW it loads from Swift
+```
+
+**Benefits for iOS:**
+- Zero memory cost at init for unread files
+- Fast startup with many files
+- Natural bridge point to Swift for on-demand loading
+- Async functions supported for network/disk fetches
+
 ## Will Work
 
 - **Parser** (`src/parser/`) - Pure JS, no Node deps
@@ -50,12 +76,13 @@ A browser bundle already exists (`8a35592`):
 
 ## Gotchas
 
-1. **Memory limits** - iOS has tighter constraints; VirtualFs holds everything in RAM
-2. **Async iteration** - Interpreter uses async generators; verify iOS JS engine support
-3. **fetch availability** - Network commands need fetch; available in iOS but may have CORS differences
-4. **No real filesystem** - OverlayFs unavailable; can only use VirtualFs
-5. **turndown for curl** - `curl` uses turndown to convert HTML responses; needs DOM context or exclude feature
-6. **Execution limits** - May need tighter defaults for mobile
+1. **Async iteration** - Interpreter uses async generators; verify iOS JS engine support
+2. **fetch availability** - Network commands need fetch; available in iOS but may have CORS differences
+3. **No real filesystem** - OverlayFs unavailable; can only use InMemoryFs
+4. **turndown for curl** - `curl` uses turndown to convert HTML responses; needs DOM context or exclude feature
+5. **Execution limits** - May need tighter defaults for mobile
+
+Note: Memory concerns addressed by lazy file loading (see above).
 
 ## Implementation Paths
 
@@ -117,8 +144,12 @@ Start with **Path A (WKWebView)** for faster iteration:
 import { Bash, InMemoryFs } from 'just-bash/browser';
 
 const fs = new InMemoryFs({
-  '/home/user/data.txt': 'file contents',
+  // Immediate small files
   '/home/user/script.sh': '#!/bin/bash\necho hello',
+
+  // Lazy load from Swift
+  '/home/user/data.txt': () => swift.readFile('data.txt'),
+  '/home/user/large.json': async () => await swift.fetchAsset('large.json'),
 });
 
 const bash = new Bash({ fs });
@@ -133,25 +164,10 @@ Upstream: `vercel-labs/just-bash`
 
 | PR | Title | iOS Relevance |
 |----|-------|---------------|
-| [#67](https://github.com/vercel-labs/just-bash/pull/67) | LazyFs for lazy in-memory files | Load files on-demand via Swift callbacks; addresses memory constraints |
 | [#66](https://github.com/vercel-labs/just-bash/pull/66) | Make Bash serializable | Persist state between app launches |
 | [#42](https://github.com/vercel-labs/just-bash/pull/42) | Custom backing store for in-memory-fs | Could allow iOS-native storage backend |
 
-**#67 LazyFs** is particularly interesting - provides callbacks for `listDir` and `loadFile` that could bridge to Swift:
-
-```typescript
-const lazyFs = new LazyFs({
-  listDir: async (dirPath) => {
-    // Bridge to Swift to list directory
-    return await swift.listDirectory(dirPath);
-  },
-  loadFile: async (filePath) => {
-    // Bridge to Swift to read file
-    return { content: await swift.readFile(filePath) };
-  },
-  allowWrites: true, // writes stay in memory
-});
-```
+Note: #67 (LazyFs) largely obsoleted by #115's lazy file providers which is now merged.
 
 ## Open Questions
 
