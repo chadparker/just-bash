@@ -79,6 +79,13 @@ describe("sed errors", () => {
       expect(result).toBeDefined();
     });
 
+    it("should error on missing start address in range", async () => {
+      const env = createEnv();
+      const result = await env.exec("sed -n ',3p' /test/file.txt");
+      expect(result.stderr).toContain("expected context address");
+      expect(result.exitCode).toBe(1);
+    });
+
     it("should error on malformed regex address", async () => {
       const env = createEnv();
       const result = await env.exec("sed '/foo d' /test/file.txt");

@@ -38,12 +38,21 @@ class SedParser {
           continue;
         }
 
+        const posBefore = this.pos;
         const result = this.parseCommand();
         if (result.error) {
           return { commands: [], error: result.error };
         }
         if (result.command) {
           allCommands.push(result.command);
+        }
+        // Defense-in-depth: if parseCommand() didn't consume any tokens,
+        // force advance to prevent infinite loops on unexpected input.
+        if (this.pos === posBefore && !this.isAtEnd()) {
+          return {
+            commands: [],
+            error: `unknown command: '${this.peek()?.value ?? this.peek()?.type}'`,
+          };
         }
       }
     }
@@ -346,12 +355,21 @@ class SedParser {
         continue;
       }
 
+      const posBefore = this.pos;
       const result = this.parseCommand();
       if (result.error) {
         return { command: null, error: result.error };
       }
       if (result.command) {
         commands.push(result.command);
+      }
+      // Defense-in-depth: if parseCommand() didn't consume any tokens,
+      // force advance to prevent infinite loops on unexpected input.
+      if (this.pos === posBefore && !this.isAtEnd()) {
+        return {
+          command: null,
+          error: `unknown command: '${this.peek()?.value ?? this.peek()?.type}'`,
+        };
       }
     }
 
@@ -369,6 +387,13 @@ class SedParser {
     | { address: AddressRange; error?: undefined }
     | { address?: undefined; error: string }
     | undefined {
+    // A leading comma means an address range with a missing start address (e.g. ",80p").
+    // GNU/BSD sed treat this as a parse error; in just-bash it can otherwise cause the
+    // parser to get stuck without consuming any tokens.
+    if (this.check(SedTokenType.COMMA)) {
+      return { error: "expected context address" };
+    }
+
     // Try to parse first address
     const start = this.parseAddress();
     if (start === undefined) {
