@@ -23,6 +23,13 @@ import type {
   RmOptions,
   WriteFileOptions,
 } from "../interface.js";
+import {
+  normalizePath,
+  sanitizeSymlinkTarget,
+  validatePath,
+  validateRealPath,
+  validateRootDirectory,
+} from "../real-fs-utils.js";
 
 interface MemoryFileEntry {
   type: "file";
@@ -77,18 +84,9 @@ export interface OverlayFsOptions {
 /** Default mount point for OverlayFs */
 const DEFAULT_MOUNT_POINT = "/home/user/project";
 
-/**
- * Validate that a path does not contain null bytes.
- * Null bytes in paths can be used to truncate filenames or bypass security filters.
- */
-function validatePath(path: string, operation: string): void {
-  if (path.includes("\0")) {
-    throw new Error(`ENOENT: path contains null byte, ${operation} '${path}'`);
-  }
-}
-
 export class OverlayFs implements IFileSystem {
   private readonly root: string;
+  private readonly canonicalRoot: string;
   private readonly mountPoint: string;
   private readonly readOnly: boolean;
   private readonly maxFileReadSize: number;
@@ -113,13 +111,10 @@ export class OverlayFs implements IFileSystem {
     this.maxFileReadSize = options.maxFileReadSize ?? 10485760;
 
     // Verify root exists and is a directory
-    if (!fs.existsSync(this.root)) {
-      throw new Error(`OverlayFs root does not exist: ${this.root}`);
-    }
-    const stat = fs.statSync(this.root);
-    if (!stat.isDirectory()) {
-      throw new Error(`OverlayFs root is not a directory: ${this.root}`);
-    }
+    validateRootDirectory(this.root, "OverlayFs");
+
+    // Compute canonical root (resolves symlinks like /var -> /private/var on macOS)
+    this.canonicalRoot = fs.realpathSync(this.root);
 
     // Create mount point directory structure in memory layer
     this.createMountPointDirs();
@@ -171,7 +166,7 @@ export class OverlayFs implements IFileSystem {
    * Create a virtual directory in memory (sync, for initialization)
    */
   mkdirSync(path: string, _options?: MkdirOptions): void {
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     const parts = normalized.split("/").filter(Boolean);
     let current = "";
     for (const part of parts) {
@@ -190,7 +185,7 @@ export class OverlayFs implements IFileSystem {
    * Create a virtual file in memory (sync, for initialization)
    */
   writeFileSync(path: string, content: string | Uint8Array): void {
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     // Ensure parent directories exist
     const parent = this.getDirname(normalized);
     if (parent !== "/") {
@@ -211,33 +206,6 @@ export class OverlayFs implements IFileSystem {
   private getDirname(path: string): string {
     const lastSlash = path.lastIndexOf("/");
     return lastSlash === 0 ? "/" : path.slice(0, lastSlash);
-  }
-
-  /**
-   * Normalize a virtual path (resolve . and .., ensure starts with /)
-   */
-  private normalizePath(path: string): string {
-    if (!path || path === "/") return "/";
-
-    let normalized =
-      path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path;
-
-    if (!normalized.startsWith("/")) {
-      normalized = `/${normalized}`;
-    }
-
-    const parts = normalized.split("/").filter((p) => p && p !== ".");
-    const resolved: string[] = [];
-
-    for (const part of parts) {
-      if (part === "..") {
-        resolved.pop();
-      } else {
-        resolved.push(part);
-      }
-    }
-
-    return `/${resolved.join("/")}` || "/";
   }
 
   /**
@@ -266,7 +234,7 @@ export class OverlayFs implements IFileSystem {
    * Returns null if the path is not under the mount point or would escape the root.
    */
   private toRealPath(virtualPath: string): string | null {
-    const normalized = this.normalizePath(virtualPath);
+    const normalized = normalizePath(virtualPath);
 
     // Check if path is under the mount point
     const relativePath = this.getRelativeToMount(normalized);
@@ -289,7 +257,7 @@ export class OverlayFs implements IFileSystem {
   }
 
   private dirname(path: string): string {
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     if (normalized === "/") return "/";
     const lastSlash = normalized.lastIndexOf("/");
     return lastSlash === 0 ? "/" : normalized.slice(0, lastSlash);
@@ -315,7 +283,7 @@ export class OverlayFs implements IFileSystem {
    * Check if a path exists in the overlay (memory + real fs - deleted)
    */
   private async existsInOverlay(virtualPath: string): Promise<boolean> {
-    const normalized = this.normalizePath(virtualPath);
+    const normalized = normalizePath(virtualPath);
 
     // Deleted in memory layer?
     if (this.deleted.has(normalized)) {
@@ -327,14 +295,20 @@ export class OverlayFs implements IFileSystem {
       return true;
     }
 
-    // Check real filesystem
+    // Check real filesystem using lstat to avoid following OS-level symlinks.
+    // Using access() or stat() would follow symlinks and could leak existence
+    // of files outside the sandbox.
+    // Validate only the parent directory since lstat doesn't follow the final component.
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (
+      !realPath ||
+      !validateRealPath(nodePath.dirname(realPath), this.canonicalRoot)
+    ) {
       return false;
     }
 
     try {
-      await fs.promises.access(realPath);
+      await fs.promises.lstat(realPath);
       return true;
     } catch {
       return false;
@@ -355,7 +329,7 @@ export class OverlayFs implements IFileSystem {
     seen: Set<string> = new Set(),
   ): Promise<Uint8Array> {
     validatePath(path, "open");
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     // Detect symlink loops
     if (seen.has(normalized)) {
@@ -387,15 +361,16 @@ export class OverlayFs implements IFileSystem {
 
     // Fall back to real filesystem
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (!realPath || !validateRealPath(realPath, this.canonicalRoot)) {
       throw new Error(`ENOENT: no such file or directory, open '${path}'`);
     }
 
     try {
       const stat = await fs.promises.lstat(realPath);
       if (stat.isSymbolicLink()) {
-        const target = await fs.promises.readlink(realPath);
-        const resolvedTarget = this.resolveSymlink(normalized, target);
+        const rawTarget = await fs.promises.readlink(realPath);
+        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
         return this.readFileBuffer(resolvedTarget, seen);
       }
       if (stat.isDirectory()) {
@@ -425,7 +400,7 @@ export class OverlayFs implements IFileSystem {
   ): Promise<void> {
     validatePath(path, "write");
     this.assertWritable(`write '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     this.ensureParentDirs(normalized);
 
     const encoding = getEncoding(options);
@@ -447,7 +422,7 @@ export class OverlayFs implements IFileSystem {
   ): Promise<void> {
     validatePath(path, "append");
     this.assertWritable(`append '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     const encoding = getEncoding(options);
     const newBuffer = toBuffer(content, encoding);
 
@@ -482,7 +457,7 @@ export class OverlayFs implements IFileSystem {
 
   async stat(path: string, seen: Set<string> = new Set()): Promise<FsStat> {
     validatePath(path, "stat");
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     // Detect symlink loops
     if (seen.has(normalized)) {
@@ -522,19 +497,28 @@ export class OverlayFs implements IFileSystem {
 
     // Fall back to real filesystem
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (!realPath || !validateRealPath(realPath, this.canonicalRoot)) {
       throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
     }
 
     try {
-      const stat = await fs.promises.stat(realPath);
+      // Use lstat to avoid following OS-level symlinks directly.
+      // If it's a symlink, resolve through the virtual layer to prevent
+      // leaking metadata about files outside the sandbox.
+      const lstatResult = await fs.promises.lstat(realPath);
+      if (lstatResult.isSymbolicLink()) {
+        const rawTarget = await fs.promises.readlink(realPath);
+        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
+        return this.stat(resolvedTarget, seen);
+      }
       return {
-        isFile: stat.isFile(),
-        isDirectory: stat.isDirectory(),
+        isFile: lstatResult.isFile(),
+        isDirectory: lstatResult.isDirectory(),
         isSymbolicLink: false,
-        mode: stat.mode,
-        size: stat.size,
-        mtime: stat.mtime,
+        mode: lstatResult.mode,
+        size: lstatResult.size,
+        mtime: lstatResult.mtime,
       };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
@@ -546,7 +530,7 @@ export class OverlayFs implements IFileSystem {
 
   async lstat(path: string): Promise<FsStat> {
     validatePath(path, "lstat");
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     if (this.deleted.has(normalized)) {
       throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
@@ -582,8 +566,13 @@ export class OverlayFs implements IFileSystem {
     }
 
     // Fall back to real filesystem
+    // For lstat, validate only the parent directory (lstat should not follow
+    // the final component, so we only need the parent to be within sandbox)
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (
+      !realPath ||
+      !validateRealPath(nodePath.dirname(realPath), this.canonicalRoot)
+    ) {
       throw new Error(`ENOENT: no such file or directory, lstat '${path}'`);
     }
 
@@ -607,16 +596,44 @@ export class OverlayFs implements IFileSystem {
 
   private resolveSymlink(symlinkPath: string, target: string): string {
     if (target.startsWith("/")) {
-      return this.normalizePath(target);
+      return normalizePath(target);
     }
     const dir = this.dirname(symlinkPath);
-    return this.normalizePath(dir === "/" ? `/${target}` : `${dir}/${target}`);
+    return normalizePath(dir === "/" ? `/${target}` : `${dir}/${target}`);
+  }
+
+  /**
+   * Convert a real-fs symlink target to a virtual target suitable for resolveSymlink.
+   * Handles absolute real-fs paths that point within the root by converting them
+   * to virtual paths relative to the mount point.
+   */
+  private realTargetToVirtual(
+    _symlinkVirtualPath: string,
+    rawTarget: string,
+  ): string {
+    const result = sanitizeSymlinkTarget(rawTarget, this.canonicalRoot);
+
+    if (result.withinRoot) {
+      if (!nodePath.isAbsolute(rawTarget)) {
+        // Relative targets work the same way in both real and virtual fs
+        return rawTarget;
+      }
+      // Target is within root - convert to virtual path under mount point
+      const relativePath = result.relativePath;
+      if (this.mountPoint === "/") {
+        return relativePath;
+      }
+      return `${this.mountPoint}${relativePath}`;
+    }
+
+    // Target is outside root - return sanitized basename
+    return result.safeName;
   }
 
   async mkdir(path: string, options?: MkdirOptions): Promise<void> {
     validatePath(path, "mkdir");
     this.assertWritable(`mkdir '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     // Check if it exists (in memory or real fs)
     const exists = await this.existsInOverlay(normalized);
@@ -695,7 +712,7 @@ export class OverlayFs implements IFileSystem {
 
     // Add entries from real filesystem with file types
     const realPath = this.toRealPath(normalized);
-    if (realPath) {
+    if (realPath && validateRealPath(realPath, this.canonicalRoot)) {
       try {
         const realEntries = await fs.promises.readdir(realPath, {
           withFileTypes: true,
@@ -739,7 +756,7 @@ export class OverlayFs implements IFileSystem {
     path: string,
     followedSymlink = false,
   ): Promise<{ normalized: string; outsideOverlay: boolean }> {
-    let normalized = this.normalizePath(path);
+    let normalized = normalizePath(path);
     const seen = new Set<string>();
     let didFollowSymlink = followedSymlink;
 
@@ -771,7 +788,7 @@ export class OverlayFs implements IFileSystem {
 
     // Check real filesystem
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (!realPath || !validateRealPath(realPath, this.canonicalRoot)) {
       // Path doesn't map to real filesystem (security check failed)
       return { normalized, outsideOverlay: true };
     }
@@ -779,8 +796,9 @@ export class OverlayFs implements IFileSystem {
     try {
       const stat = await fs.promises.lstat(realPath);
       if (stat.isSymbolicLink()) {
-        const target = await fs.promises.readlink(realPath);
-        const resolvedTarget = this.resolveSymlink(normalized, target);
+        const rawTarget = await fs.promises.readlink(realPath);
+        const virtualTarget = this.realTargetToVirtual(normalized, rawTarget);
+        const resolvedTarget = this.resolveSymlink(normalized, virtualTarget);
         return this.resolveForReaddir(resolvedTarget, true);
       }
       // Path exists on real filesystem
@@ -827,7 +845,7 @@ export class OverlayFs implements IFileSystem {
   async rm(path: string, options?: RmOptions): Promise<void> {
     validatePath(path, "rm");
     this.assertWritable(`rm '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {
@@ -851,7 +869,15 @@ export class OverlayFs implements IFileSystem {
           }
         }
       }
-    } catch {
+    } catch (e) {
+      // Re-throw ENOTEMPTY and other intentional errors.
+      // Only swallow errors from stat/readdir failing (e.g., ENOENT on real-fs).
+      if (
+        e instanceof Error &&
+        (e.message.includes("ENOTEMPTY") || e.message.includes("EISDIR"))
+      ) {
+        throw e;
+      }
       // If stat fails, we'll just mark it as deleted
     }
 
@@ -864,8 +890,8 @@ export class OverlayFs implements IFileSystem {
     validatePath(src, "cp");
     validatePath(dest, "cp");
     this.assertWritable(`cp '${dest}'`);
-    const srcNorm = this.normalizePath(src);
-    const destNorm = this.normalizePath(dest);
+    const srcNorm = normalizePath(src);
+    const destNorm = normalizePath(dest);
 
     const srcExists = await this.existsInOverlay(srcNorm);
     if (!srcExists) {
@@ -900,10 +926,10 @@ export class OverlayFs implements IFileSystem {
 
   resolvePath(base: string, path: string): string {
     if (path.startsWith("/")) {
-      return this.normalizePath(path);
+      return normalizePath(path);
     }
     const combined = base === "/" ? `/${path}` : `${base}/${path}`;
-    return this.normalizePath(combined);
+    return normalizePath(combined);
   }
 
   getAllPaths(): string[] {
@@ -926,7 +952,7 @@ export class OverlayFs implements IFileSystem {
     if (this.deleted.has(virtualDir)) return;
 
     const realPath = this.toRealPath(virtualDir);
-    if (!realPath) return;
+    if (!realPath || !validateRealPath(realPath, this.canonicalRoot)) return;
 
     try {
       const entries = fs.readdirSync(realPath);
@@ -937,7 +963,9 @@ export class OverlayFs implements IFileSystem {
         paths.add(virtualPath);
 
         const entryRealPath = nodePath.join(realPath, entry);
-        const stat = fs.statSync(entryRealPath);
+        // Use lstatSync to avoid following OS symlinks that could point
+        // outside the sandbox root. Symlinks are listed but not traversed.
+        const stat = fs.lstatSync(entryRealPath);
         if (stat.isDirectory()) {
           this.scanRealFs(virtualPath, paths);
         }
@@ -950,7 +978,7 @@ export class OverlayFs implements IFileSystem {
   async chmod(path: string, mode: number): Promise<void> {
     validatePath(path, "chmod");
     this.assertWritable(`chmod '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {
@@ -986,7 +1014,7 @@ export class OverlayFs implements IFileSystem {
   async symlink(target: string, linkPath: string): Promise<void> {
     validatePath(linkPath, "symlink");
     this.assertWritable(`symlink '${linkPath}'`);
-    const normalized = this.normalizePath(linkPath);
+    const normalized = normalizePath(linkPath);
 
     const exists = await this.existsInOverlay(normalized);
     if (exists) {
@@ -1007,8 +1035,8 @@ export class OverlayFs implements IFileSystem {
     validatePath(existingPath, "link");
     validatePath(newPath, "link");
     this.assertWritable(`link '${newPath}'`);
-    const existingNorm = this.normalizePath(existingPath);
-    const newNorm = this.normalizePath(newPath);
+    const existingNorm = normalizePath(existingPath);
+    const newNorm = normalizePath(newPath);
 
     const existingExists = await this.existsInOverlay(existingNorm);
     if (!existingExists) {
@@ -1041,7 +1069,7 @@ export class OverlayFs implements IFileSystem {
 
   async readlink(path: string): Promise<string> {
     validatePath(path, "readlink");
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     if (this.deleted.has(normalized)) {
       throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
@@ -1057,13 +1085,19 @@ export class OverlayFs implements IFileSystem {
     }
 
     // Fall back to real filesystem
+    // For readlink, validate only the parent directory (readlink reads the
+    // symlink itself, it doesn't follow it - same pattern as lstat)
     const realPath = this.toRealPath(normalized);
-    if (!realPath) {
+    if (
+      !realPath ||
+      !validateRealPath(nodePath.dirname(realPath), this.canonicalRoot)
+    ) {
       throw new Error(`ENOENT: no such file or directory, readlink '${path}'`);
     }
 
     try {
-      return await fs.promises.readlink(realPath);
+      const rawTarget = await fs.promises.readlink(realPath);
+      return this.realTargetToVirtual(normalized, rawTarget);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(
@@ -1083,7 +1117,7 @@ export class OverlayFs implements IFileSystem {
    */
   async realpath(path: string): Promise<string> {
     validatePath(path, "realpath");
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     const seen = new Set<string>();
 
     // Helper to resolve symlinks iteratively
@@ -1142,13 +1176,17 @@ export class OverlayFs implements IFileSystem {
         // If not in memory, check real filesystem
         if (!entry) {
           const realPath = this.toRealPath(resolved);
-          if (realPath) {
+          if (realPath && validateRealPath(realPath, this.canonicalRoot)) {
             try {
               const stat = await fs.promises.lstat(realPath);
               if (stat.isSymbolicLink()) {
-                const target = await fs.promises.readlink(realPath);
+                const rawTarget = await fs.promises.readlink(realPath);
+                const virtualTarget = this.realTargetToVirtual(
+                  resolved,
+                  rawTarget,
+                );
                 seen.add(resolved);
-                resolved = this.resolveSymlink(resolved, target);
+                resolved = this.resolveSymlink(resolved, virtualTarget);
 
                 // Continue resolving from the new path
                 // We need to restart from this point to handle nested symlinks
@@ -1189,7 +1227,7 @@ export class OverlayFs implements IFileSystem {
   async utimes(path: string, _atime: Date, mtime: Date): Promise<void> {
     validatePath(path, "utimes");
     this.assertWritable(`utimes '${path}'`);
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
 
     const exists = await this.existsInOverlay(normalized);
     if (!exists) {

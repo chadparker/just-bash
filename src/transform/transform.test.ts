@@ -19,15 +19,13 @@ describe("transform", () => {
   });
 
   describe("TeePlugin", () => {
-    it("wraps single command with stderr redirect and tee", () => {
+    it("does not wrap single commands (no existing pipe)", () => {
       const bash = new Bash();
       bash.registerTransformPlugin(
         new TeePlugin({ outputDir: "/tmp/logs", timestamp: FIXED_DATE }),
       );
       const result = bash.transform("echo hello");
-      expect(result.script).toBe(
-        `echo hello 2> /tmp/logs/${TS}-000-echo.stderr.txt | tee /tmp/logs/${TS}-000-echo.stdout.txt`,
-      );
+      expect(result.script).toBe("echo hello");
     });
 
     it("wraps each command in a pipeline", () => {
@@ -37,7 +35,7 @@ describe("transform", () => {
       );
       const result = bash.transform("echo hello | grep hello");
       expect(result.script).toBe(
-        `echo hello 2> /tmp/logs/${TS}-000-echo.stderr.txt | tee /tmp/logs/${TS}-000-echo.stdout.txt | grep hello 2> /tmp/logs/${TS}-001-grep.stderr.txt | tee /tmp/logs/${TS}-001-grep.stdout.txt`,
+        `echo hello | tee /tmp/logs/${TS}-000-echo.stdout.txt | grep hello | tee /tmp/logs/${TS}-001-grep.stdout.txt ; __tps0=\${PIPESTATUS[0]} __tps1=\${PIPESTATUS[2]} ; (exit $__tps0) | (exit $__tps1)`,
       );
     });
 
@@ -52,7 +50,7 @@ describe("transform", () => {
       );
       const result = bash.transform("cat file | sort | grep pattern | wc -l");
       expect(result.script).toBe(
-        `cat file | sort | grep pattern 2> /tmp/logs/${TS}-000-grep.stderr.txt | tee /tmp/logs/${TS}-000-grep.stdout.txt | wc -l`,
+        `cat file | sort | grep pattern | tee /tmp/logs/${TS}-000-grep.stdout.txt | wc -l ; __tps0=\${PIPESTATUS[0]} __tps1=\${PIPESTATUS[1]} __tps2=\${PIPESTATUS[2]} __tps3=\${PIPESTATUS[4]} ; (exit $__tps0) | (exit $__tps1) | (exit $__tps2) | (exit $__tps3)`,
       );
     });
 
@@ -69,14 +67,12 @@ describe("transform", () => {
           commandName: "echo",
           command: "echo hello",
           stdoutFile: `/tmp/logs/${TS}-000-echo.stdout.txt`,
-          stderrFile: `/tmp/logs/${TS}-000-echo.stderr.txt`,
         },
         {
           commandIndex: 1,
           commandName: "grep",
           command: "grep hello",
           stdoutFile: `/tmp/logs/${TS}-001-grep.stdout.txt`,
-          stderrFile: `/tmp/logs/${TS}-001-grep.stderr.txt`,
         },
       ]);
     });
@@ -88,18 +84,17 @@ describe("transform", () => {
       );
       const result = bash.transform("echo a | cat\necho b | cat");
       expect(result.script).toBe(
-        `echo a 2> /tmp/logs/${TS}-000-echo.stderr.txt | tee /tmp/logs/${TS}-000-echo.stdout.txt | cat 2> /tmp/logs/${TS}-001-cat.stderr.txt | tee /tmp/logs/${TS}-001-cat.stdout.txt\necho b 2> /tmp/logs/${TS}-002-echo.stderr.txt | tee /tmp/logs/${TS}-002-echo.stdout.txt | cat 2> /tmp/logs/${TS}-003-cat.stderr.txt | tee /tmp/logs/${TS}-003-cat.stdout.txt`,
+        `echo a | tee /tmp/logs/${TS}-000-echo.stdout.txt | cat | tee /tmp/logs/${TS}-001-cat.stdout.txt ; __tps0=\${PIPESTATUS[0]} __tps1=\${PIPESTATUS[2]} ; (exit $__tps0) | (exit $__tps1)\necho b | tee /tmp/logs/${TS}-002-echo.stdout.txt | cat | tee /tmp/logs/${TS}-003-cat.stdout.txt ; __tps0=\${PIPESTATUS[0]} __tps1=\${PIPESTATUS[2]} ; (exit $__tps0) | (exit $__tps1)`,
       );
     });
 
-    it("uses 'unknown' for dynamic command names", () => {
+    it("uses 'unknown' for dynamic command names in pipeline", () => {
       const bash = new Bash();
       bash.registerTransformPlugin(
         new TeePlugin({ outputDir: "/tmp/logs", timestamp: FIXED_DATE }),
       );
-      const result = bash.transform("$cmd hello");
+      const result = bash.transform("$cmd hello | cat");
       expect(result.script).toContain("000-unknown.stdout.txt");
-      expect(result.script).toContain("000-unknown.stderr.txt");
     });
 
     it("replaces colons in ISO timestamp", () => {
@@ -107,7 +102,7 @@ describe("transform", () => {
       bash.registerTransformPlugin(
         new TeePlugin({ outputDir: "/tmp/logs", timestamp: FIXED_DATE }),
       );
-      const result = bash.transform("echo hello");
+      const result = bash.transform("echo hello | cat");
       expect(result.script).not.toContain("10:30:45");
       expect(result.script).toContain("10-30-45");
     });
@@ -172,14 +167,14 @@ describe("transform", () => {
   });
 
   describe("plugin chaining", () => {
-    it("tee + collector: collector sees inserted tee", () => {
+    it("tee + collector: collector sees inserted tee and exit", () => {
       const bash = new Bash();
       bash.registerTransformPlugin(
         new TeePlugin({ outputDir: "/tmp/logs", timestamp: FIXED_DATE }),
       );
       bash.registerTransformPlugin(new CommandCollectorPlugin());
       const result = bash.transform("echo hello | grep hello");
-      expect(result.metadata.commands).toEqual(["echo", "grep", "tee"]);
+      expect(result.metadata.commands).toEqual(["echo", "exit", "grep", "tee"]);
     });
 
     it("metadata from multiple plugins is merged", () => {
@@ -205,7 +200,7 @@ describe("transform", () => {
         .use(new CommandCollectorPlugin())
         .transform("echo hello | grep hello");
 
-      expect(result.metadata.commands).toEqual(["echo", "grep", "tee"]);
+      expect(result.metadata.commands).toEqual(["echo", "exit", "grep", "tee"]);
       expect(result.metadata.teeFiles).toHaveLength(2);
       expect(result.metadata.teeFiles[0].commandName).toBe("echo");
       expect(result.metadata.teeFiles[1].commandName).toBe("grep");
