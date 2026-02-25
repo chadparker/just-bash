@@ -26,6 +26,13 @@ import type {
   RmOptions,
   WriteFileOptions,
 } from "../interface.js";
+import {
+  isPathWithinRoot,
+  normalizePath,
+  validatePath,
+  validateRealPath,
+  validateRootDirectory,
+} from "../real-fs-utils.js";
 
 export interface ReadWriteFsOptions {
   /**
@@ -52,13 +59,7 @@ export class ReadWriteFs implements IFileSystem {
     this.maxFileReadSize = options.maxFileReadSize ?? 10485760;
 
     // Verify root exists and is a directory
-    if (!fs.existsSync(this.root)) {
-      throw new Error(`ReadWriteFs root does not exist: ${this.root}`);
-    }
-    const stat = fs.statSync(this.root);
-    if (!stat.isDirectory()) {
-      throw new Error(`ReadWriteFs root is not a directory: ${this.root}`);
-    }
+    validateRootDirectory(this.root, "ReadWriteFs");
 
     // Compute canonical root (resolves symlinks like /var -> /private/var on macOS)
     this.canonicalRoot = fs.realpathSync(this.root);
@@ -69,41 +70,11 @@ export class ReadWriteFs implements IFileSystem {
    * Resolves all symlinks to detect escape attempts via OS-level symlinks.
    * Throws EACCES if the path escapes the root.
    */
-  private async resolveAndValidate(
-    realPath: string,
-    virtualPath: string,
-  ): Promise<void> {
-    try {
-      const resolved = await fs.promises.realpath(realPath);
-      if (
-        resolved !== this.canonicalRoot &&
-        !resolved.startsWith(`${this.canonicalRoot}/`)
-      ) {
-        throw new Error(
-          `EACCES: permission denied, '${virtualPath}' resolves outside sandbox`,
-        );
-      }
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code === "ENOENT") {
-        // File doesn't exist yet (e.g., new file being created).
-        // Validate the parent directory instead.
-        const parent = nodePath.dirname(realPath);
-        if (parent === realPath) {
-          // Reached filesystem root without finding a valid parent
-          throw new Error(
-            `EACCES: permission denied, '${virtualPath}' resolves outside sandbox`,
-          );
-        }
-        await this.resolveAndValidate(parent, virtualPath);
-      } else if (
-        err.message?.includes("EACCES") ||
-        err.message?.includes("resolves outside sandbox")
-      ) {
-        throw e;
-      } else {
-        throw e;
-      }
+  private resolveAndValidate(realPath: string, virtualPath: string): void {
+    if (!validateRealPath(realPath, this.canonicalRoot)) {
+      throw new Error(
+        `EACCES: permission denied, '${virtualPath}' resolves outside sandbox`,
+      );
     }
   }
 
@@ -111,48 +82,18 @@ export class ReadWriteFs implements IFileSystem {
    * Validate the parent directory of a path (for operations like lstat/readlink
    * that should not follow the final component's symlink).
    */
-  private async validateParent(
-    realPath: string,
-    virtualPath: string,
-  ): Promise<void> {
+  private validateParent(realPath: string, virtualPath: string): void {
     const parent = nodePath.dirname(realPath);
-    await this.resolveAndValidate(parent, virtualPath);
+    this.resolveAndValidate(parent, virtualPath);
   }
 
   /**
    * Convert a virtual path to a real filesystem path.
    */
   private toRealPath(virtualPath: string): string {
-    const normalized = this.normalizePath(virtualPath);
+    const normalized = normalizePath(virtualPath);
     const realPath = nodePath.join(this.root, normalized);
     return nodePath.resolve(realPath);
-  }
-
-  /**
-   * Normalize a virtual path (resolve . and .., ensure starts with /)
-   */
-  private normalizePath(path: string): string {
-    if (!path || path === "/") return "/";
-
-    let normalized =
-      path.endsWith("/") && path !== "/" ? path.slice(0, -1) : path;
-
-    if (!normalized.startsWith("/")) {
-      normalized = `/${normalized}`;
-    }
-
-    const parts = normalized.split("/").filter((p) => p && p !== ".");
-    const resolved: string[] = [];
-
-    for (const part of parts) {
-      if (part === "..") {
-        resolved.pop();
-      } else {
-        resolved.push(part);
-      }
-    }
-
-    return `/${resolved.join("/")}` || "/";
   }
 
   async readFile(
@@ -165,8 +106,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async readFileBuffer(path: string): Promise<Uint8Array> {
+    validatePath(path, "open");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       if (this.maxFileReadSize > 0) {
@@ -202,8 +144,9 @@ export class ReadWriteFs implements IFileSystem {
     content: FileContent,
     options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
+    validatePath(path, "write");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
     const encoding = getEncoding(options);
     const buffer = toBuffer(content, encoding);
 
@@ -219,8 +162,9 @@ export class ReadWriteFs implements IFileSystem {
     content: FileContent,
     options?: WriteFileOptions | BufferEncoding,
   ): Promise<void> {
+    validatePath(path, "append");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
     const encoding = getEncoding(options);
     const buffer = toBuffer(content, encoding);
 
@@ -234,7 +178,7 @@ export class ReadWriteFs implements IFileSystem {
   async exists(path: string): Promise<boolean> {
     const realPath = this.toRealPath(path);
     try {
-      await this.resolveAndValidate(realPath, path);
+      this.resolveAndValidate(realPath, path);
       await fs.promises.access(realPath);
       return true;
     } catch {
@@ -243,8 +187,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async stat(path: string): Promise<FsStat> {
+    validatePath(path, "stat");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       const stat = await fs.promises.stat(realPath);
@@ -266,8 +211,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async lstat(path: string): Promise<FsStat> {
+    validatePath(path, "lstat");
     const realPath = this.toRealPath(path);
-    await this.validateParent(realPath, path);
+    this.validateParent(realPath, path);
 
     try {
       const stat = await fs.promises.lstat(realPath);
@@ -289,8 +235,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async mkdir(path: string, options?: MkdirOptions): Promise<void> {
+    validatePath(path, "mkdir");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       await fs.promises.mkdir(realPath, { recursive: options?.recursive });
@@ -312,8 +259,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async readdirWithFileTypes(path: string): Promise<DirentEntry[]> {
+    validatePath(path, "scandir");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       const entries = await fs.promises.readdir(realPath, {
@@ -340,8 +288,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async rm(path: string, options?: RmOptions): Promise<void> {
+    validatePath(path, "rm");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       await fs.promises.rm(realPath, {
@@ -361,10 +310,12 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async cp(src: string, dest: string, options?: CpOptions): Promise<void> {
+    validatePath(src, "cp");
+    validatePath(dest, "cp");
     const srcReal = this.toRealPath(src);
     const destReal = this.toRealPath(dest);
-    await this.resolveAndValidate(srcReal, src);
-    await this.resolveAndValidate(destReal, dest);
+    this.resolveAndValidate(srcReal, src);
+    this.resolveAndValidate(destReal, dest);
 
     try {
       await fs.promises.cp(srcReal, destReal, {
@@ -381,10 +332,7 @@ export class ReadWriteFs implements IFileSystem {
                 .realpath(source)
                 .catch(() => null);
               if (resolved === null) return false;
-              return (
-                resolved === this.canonicalRoot ||
-                resolved.startsWith(`${this.canonicalRoot}/`)
-              );
+              return isPathWithinRoot(resolved, this.canonicalRoot);
             }
             return true;
           } catch {
@@ -407,8 +355,8 @@ export class ReadWriteFs implements IFileSystem {
   async mv(src: string, dest: string): Promise<void> {
     const srcReal = this.toRealPath(src);
     const destReal = this.toRealPath(dest);
-    await this.resolveAndValidate(srcReal, src);
-    await this.resolveAndValidate(destReal, dest);
+    this.resolveAndValidate(srcReal, src);
+    this.resolveAndValidate(destReal, dest);
 
     // Check if source is a symlink - if so, validate that its target
     // will still be valid after the move (prevents mv+symlink escape)
@@ -424,10 +372,7 @@ export class ReadWriteFs implements IFileSystem {
         const canonicalTarget = await fs.promises
           .realpath(resolvedTarget)
           .catch(() => resolvedTarget);
-        if (
-          canonicalTarget !== this.canonicalRoot &&
-          !canonicalTarget.startsWith(`${this.canonicalRoot}/`)
-        ) {
+        if (!isPathWithinRoot(canonicalTarget, this.canonicalRoot)) {
           throw new Error(
             `EACCES: permission denied, mv '${src}' -> '${dest}' would create symlink escaping sandbox`,
           );
@@ -470,10 +415,10 @@ export class ReadWriteFs implements IFileSystem {
 
   resolvePath(base: string, path: string): string {
     if (path.startsWith("/")) {
-      return this.normalizePath(path);
+      return normalizePath(path);
     }
     const combined = base === "/" ? `/${path}` : `${base}/${path}`;
-    return this.normalizePath(combined);
+    return normalizePath(combined);
   }
 
   getAllPaths(): string[] {
@@ -507,8 +452,9 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async chmod(path: string, mode: number): Promise<void> {
+    validatePath(path, "chmod");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       await fs.promises.chmod(realPath, mode);
@@ -522,20 +468,19 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
+    validatePath(linkPath, "symlink");
     const realLinkPath = this.toRealPath(linkPath);
     // Validate that the link path's parent stays within sandbox
     // (prevents creating symlinks outside via pre-existing OS symlinks in parent path)
-    await this.validateParent(realLinkPath, linkPath);
+    this.validateParent(realLinkPath, linkPath);
 
     // Validate and transform symlink target to prevent sandbox escape.
     // Resolve the target: if absolute, treat as virtual path; if relative, resolve from link's dir
-    const normalizedLinkPath = this.normalizePath(linkPath);
-    const linkDir = this.normalizePath(nodePath.dirname(normalizedLinkPath));
+    const normalizedLinkPath = normalizePath(linkPath);
+    const linkDir = normalizePath(nodePath.dirname(normalizedLinkPath));
     const resolvedVirtualTarget = target.startsWith("/")
-      ? this.normalizePath(target)
-      : this.normalizePath(
-          linkDir === "/" ? `/${target}` : `${linkDir}/${target}`,
-        );
+      ? normalizePath(target)
+      : normalizePath(linkDir === "/" ? `/${target}` : `${linkDir}/${target}`);
 
     // Convert to real path - this is where the symlink should actually point
     const resolvedRealTarget = nodePath.join(this.root, resolvedVirtualTarget);
@@ -559,10 +504,12 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async link(existingPath: string, newPath: string): Promise<void> {
+    validatePath(existingPath, "link");
+    validatePath(newPath, "link");
     const realExisting = this.toRealPath(existingPath);
     const realNew = this.toRealPath(newPath);
-    await this.resolveAndValidate(realExisting, existingPath);
-    await this.resolveAndValidate(realNew, newPath);
+    this.resolveAndValidate(realExisting, existingPath);
+    this.resolveAndValidate(realNew, newPath);
 
     try {
       await fs.promises.link(realExisting, realNew);
@@ -586,15 +533,16 @@ export class ReadWriteFs implements IFileSystem {
   }
 
   async readlink(path: string): Promise<string> {
+    validatePath(path, "readlink");
     const realPath = this.toRealPath(path);
-    await this.validateParent(realPath, path);
+    this.validateParent(realPath, path);
 
     try {
       const rawTarget = await fs.promises.readlink(realPath);
 
       // Convert the raw OS target to a virtual path to prevent
       // leaking real filesystem paths outside the sandbox.
-      const normalizedVirtual = this.normalizePath(path);
+      const normalizedVirtual = normalizePath(path);
       const linkDir = nodePath.dirname(normalizedVirtual);
 
       // Resolve the raw target to an absolute real path
@@ -605,10 +553,7 @@ export class ReadWriteFs implements IFileSystem {
         .realpath(resolvedRealTarget)
         .catch(() => resolvedRealTarget);
 
-      if (
-        canonicalTarget === this.canonicalRoot ||
-        canonicalTarget.startsWith(`${this.canonicalRoot}/`)
-      ) {
+      if (isPathWithinRoot(canonicalTarget, this.canonicalRoot)) {
         // Within root - compute virtual target path and return as relative
         const virtualTarget =
           canonicalTarget.slice(this.canonicalRoot.length) || "/";
@@ -650,6 +595,7 @@ export class ReadWriteFs implements IFileSystem {
    * This is equivalent to POSIX realpath().
    */
   async realpath(path: string): Promise<string> {
+    validatePath(path, "realpath");
     const realPath = this.toRealPath(path);
 
     try {
@@ -658,10 +604,7 @@ export class ReadWriteFs implements IFileSystem {
       // Use canonicalRoot (computed at construction) for consistent comparison
       // with resolveAndValidate. Use boundary-safe prefix check to prevent
       // /data matching /datastore.
-      if (
-        resolved === this.canonicalRoot ||
-        resolved.startsWith(`${this.canonicalRoot}/`)
-      ) {
+      if (isPathWithinRoot(resolved, this.canonicalRoot)) {
         const relative = resolved.slice(this.canonicalRoot.length);
         return relative || "/";
       }
@@ -690,8 +633,9 @@ export class ReadWriteFs implements IFileSystem {
    * @param mtime - Modification time
    */
   async utimes(path: string, atime: Date, mtime: Date): Promise<void> {
+    validatePath(path, "utimes");
     const realPath = this.toRealPath(path);
-    await this.resolveAndValidate(realPath, path);
+    this.resolveAndValidate(realPath, path);
 
     try {
       await fs.promises.utimes(realPath, atime, mtime);
